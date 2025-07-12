@@ -1,0 +1,31 @@
+<mxfile host="Electron" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/27.0.9 Chrome/134.0.6998.205 Electron/35.4.0 Safari/537.36" version="27.0.9">
+  <diagram name="Page-1" id="9dZZUw2LY3uFVJvlSRDF">
+    <mxGraphModel dx="1488" dy="928" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="300" pageHeight="200" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="pXtF3fnjAEAWnYVDqMx1-1" value="LiDAR PS Tool" style="strokeWidth=1;shadow=0;dashed=0;align=center;html=1;shape=mxgraph.mockup.containers.window;align=left;verticalAlign=top;spacingLeft=8;strokeColor2=#008cff;strokeColor3=#c4c4c4;fontColor=#666666;mainText=;fontSize=17;labelBackgroundColor=none;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="-180" y="-80" width="550" height="380" as="geometry" />
+        </mxCell>
+        <mxCell id="pXtF3fnjAEAWnYVDqMx1-4" value="Load point cloud file" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=0.5;" vertex="1" parent="1">
+          <mxGeometry x="35" y="30" width="120" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="pXtF3fnjAEAWnYVDqMx1-5" value="" style="verticalLabelPosition=bottom;verticalAlign=top;html=1;shadow=0;dashed=0;strokeWidth=1;shape=mxgraph.ios.iCloudProgressBar;barPos=20;" vertex="1" parent="1">
+          <mxGeometry x="-90" y="80" width="370" height="10" as="geometry" />
+        </mxCell>
+        <mxCell id="pXtF3fnjAEAWnYVDqMx1-6" value="100%" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="277" y="70" width="60" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="pXtF3fnjAEAWnYVDqMx1-7" value="Texto informativo, indica que la carga y lectura del archivo fue exitosa (texto verde) o fallida (texto rojo)" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+          <mxGeometry x="-70" y="110" width="330" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="pXtF3fnjAEAWnYVDqMx1-8" value="&lt;font style=&quot;color: rgb(179, 179, 179);&quot;&gt;Preview point cloud&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=0.5;fillColor=#eeeeee;strokeColor=#36393d;" vertex="1" parent="1">
+          <mxGeometry x="-100" y="200" width="120" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="pXtF3fnjAEAWnYVDqMx1-10" value="&lt;font style=&quot;color: rgb(179, 179, 179);&quot;&gt;Next -&amp;gt;&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=0.5;fillColor=#eeeeee;strokeColor=#36393d;" vertex="1" parent="1">
+          <mxGeometry x="160" y="200" width="120" height="30" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

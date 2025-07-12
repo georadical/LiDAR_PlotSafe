@@ -1,0 +1,19 @@
+# LiDAR PlotSafe - Dependencias principales
+# 2025 LiDAR PlotSafe Project. All rights reserved.
+
+# Procesamiento de nubes de puntos
+laspy==2.5.3
+lazrs>=0.4.0
+open3d==0.19.0
+pyntcloud==0.3.1
+
+# Ciencia de datos y matemáticas
+numpy==1.24.3
+scipy==1.10.1
+pandas==2.0.3
+
+# Configuración
+pyyaml==6.0.1
+
+# Logging y utilidades
+tqdm==4.65.0

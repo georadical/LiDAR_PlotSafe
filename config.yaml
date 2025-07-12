@@ -1,0 +1,16 @@
+# Configuración del LiDAR PlotSafe Pipeline
+# © 2025 LiDAR PlotSafe Project. All rights reserved.
+
+# Parámetros de entrada/salida
+input: ""  # Ruta al archivo LAS/LAZ
+output: "results.csv"  # Archivo de salida
+
+# Parámetros de procesamiento
+radius: 15.0  # Radio de recorte del plot (metros)
+mesh: false  # Generar mesh (true/false)
+threads: 4  # Número de hilos para procesamiento paralelo
+verbose: true  # Habilita logs detallados
+
+# Coordenada semilla opcional (para árbol central)
+# Formato: [X, Y, Z]
+seed: []
