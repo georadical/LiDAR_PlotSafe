@@ -19,6 +19,7 @@ import traceback
 
 # Import LiDAR PlotSafe modules
 from src import io
+from src.processing import crop_circular_plot
 
 # Path configuration
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -98,7 +99,7 @@ class LiDARPlotSafeLauncher(tk.Tk):
         # Create frames for different views
         # Crear marcos para diferentes vistas
         self.frames = {}
-        for F in (LoadFrame, ParametersFrame):
+        for F in (LoadFrame, ParametersFrame, ClassificationFrame):
             frame = F(content_frame, self)
             self.frames[F.__name__] = frame
             frame.pack(fill=tk.BOTH, expand=True)
@@ -469,6 +470,7 @@ class LoadFrame(ttk.Frame):
             # Store loaded data in controller
             self.controller.point_cloud = points
             self.controller.point_cloud_summary = summary
+            self.controller.raw_file_link.set(filename)  # Set file path in controller variable
             
             # Update UI with more detailed information
             self.dimensions_label["text"] = (
@@ -745,7 +747,7 @@ class ParametersFrame(ttk.Frame):
         """
         Initializes the parameters frame.
         
-        Initializes the parameters frame.
+        Inicializa el marco de parámetros.
         
         Args:
             parent: Parent widget.
@@ -754,16 +756,605 @@ class ParametersFrame(ttk.Frame):
         super().__init__(parent)
         self.controller = controller
         
-        # Create widgets
-        label = ttk.Label(self, text="Parameters configuration (coming soon)", font=("Arial", 14))
-        label.pack(pady=50)
+        # Status message frame (at the bottom of the window)
+        # Marco de mensaje de estado (en la parte inferior de la ventana)
+        status_frame = ttk.Frame(self)
+        status_frame.pack(fill=tk.X, side=tk.BOTTOM, padx=20, pady=10)
         
-        back_button = ttk.Button(
-            self, 
+        # Status message (initially empty)
+        # Mensaje de estado (inicialmente vacío)
+        self.status_label = ttk.Label(
+            status_frame, 
+            text="",
+            font=("Arial", 11),
+            foreground=self.controller.ACCENT_COLOR,
+            background=self.controller.CONTENT_COLOR,
+            borderwidth=1,
+            relief="solid",
+            padding=5,
+            anchor="center",
+            justify="center"
+        )
+        self.status_label.pack(fill=tk.X)
+        self.status_label.pack_forget()  # Hidden initially
+        
+        # Create content frame with proper styling
+        # Crear marco de contenido con estilo adecuado
+        self.content_frame = ttk.Frame(self)
+        self.content_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Title for the parameters section
+        # Título para la sección de parámetros
+        title_label = ttk.Label(
+            self.content_frame,
+            text="Plot Cropping Parameters",
+            font=("Arial", 14, "bold"),
+            foreground=self.controller.TEXT_COLOR,
+            background=self.controller.CONTENT_COLOR
+        )
+        title_label.pack(pady=(5, 15))
+        
+        # Instructions label
+        # Etiqueta de instrucciones
+        instructions = ttk.Label(
+            self.content_frame,
+            text="Set the circular crop parameters for your point cloud.\nA circular area will be extracted based on these coordinates.",
+            justify="center",
+            background=self.controller.CONTENT_COLOR
+        )
+        instructions.pack(pady=(0, 15))
+        
+        # Form frame for parameters input
+        # Marco de formulario para entrada de parámetros
+        form_frame = ttk.Frame(self.content_frame)
+        form_frame.pack(fill=tk.X, padx=50, pady=10)
+        
+        # Variables for storing the parameter values
+        # Variables para almacenar los valores de los parámetros
+        self.x_center = tk.DoubleVar(value=0.0)
+        self.y_center = tk.DoubleVar(value=0.0)
+        self.radius = tk.DoubleVar(value=11.28)  # Default circular plot radius for forestry (approx. 400 m²)
+        
+        # Create form fields with labels
+        # Crear campos de formulario con etiquetas
+        
+        # X coordinate
+        x_frame = ttk.Frame(form_frame)
+        x_frame.pack(fill=tk.X, pady=5)
+        
+        x_label = ttk.Label(
+            x_frame,
+            text="Center X coordinate (m):",
+            width=25,
+            anchor="e"
+        )
+        x_label.pack(side=tk.LEFT, padx=(0, 5))
+        
+        x_entry = ttk.Entry(
+            x_frame,
+            textvariable=self.x_center,
+            width=15
+        )
+        x_entry.pack(side=tk.LEFT)
+        
+        # Y coordinate
+        y_frame = ttk.Frame(form_frame)
+        y_frame.pack(fill=tk.X, pady=5)
+        
+        y_label = ttk.Label(
+            y_frame,
+            text="Center Y coordinate (m):",
+            width=25,
+            anchor="e"
+        )
+        y_label.pack(side=tk.LEFT, padx=(0, 5))
+        
+        y_entry = ttk.Entry(
+            y_frame,
+            textvariable=self.y_center,
+            width=15
+        )
+        y_entry.pack(side=tk.LEFT)
+        
+        # Radius
+        radius_frame = ttk.Frame(form_frame)
+        radius_frame.pack(fill=tk.X, pady=5)
+        
+        radius_label = ttk.Label(
+            radius_frame,
+            text="Circle radius (m):",
+            width=25,
+            anchor="e"
+        )
+        radius_label.pack(side=tk.LEFT, padx=(0, 5))
+        
+        radius_entry = ttk.Entry(
+            radius_frame,
+            textvariable=self.radius,
+            width=15
+        )
+        radius_entry.pack(side=tk.LEFT)
+        
+        # Information about default values
+        # Información sobre valores predeterminados
+        info_label = ttk.Label(
+            form_frame,
+            text="Note: Default radius of 11.28m creates a circular plot of approximately 400 m²",
+            font=("Arial", 9, "italic"),
+            foreground="gray"
+        )
+        info_label.pack(pady=(5, 15))
+        
+        # Progress bar and percentage in same frame
+        # Barra de progreso y porcentaje en el mismo frame
+        progress_frame = ttk.Frame(self.content_frame)
+        progress_frame.pack(fill=tk.X, padx=50, pady=(5, 15))
+
+        self.progress_bar = ttk.Progressbar(
+            progress_frame, 
+            orient="horizontal", 
+            length=450,
+            mode="determinate"
+        )
+        self.progress_bar.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # Percentage label positioned to the right of progress bar
+        # Etiqueta de porcentaje posicionada a la derecha de la barra de progreso
+        self.percentage_label = ttk.Label(
+            progress_frame,
+            text="0%",
+            font=("Arial", 10, "bold"),
+            foreground="green",
+            width=5
+        )
+        self.percentage_label.pack(side=tk.RIGHT, padx=(5, 0))
+        self.percentage_label.pack_forget()  # Initially hidden
+        
+        # Navigation buttons at the bottom
+        # Botones de navegación en la parte inferior
+        button_frame = ttk.Frame(self.content_frame)
+        button_frame.pack(fill=tk.X, padx=50, pady=20)
+        
+        # Left side buttons
+        # Botones del lado izquierdo
+        left_buttons = ttk.Frame(button_frame)
+        left_buttons.pack(side=tk.LEFT, fill=tk.X)
+        
+        # Back button (left side)
+        # Botón volver (lado izquierdo)
+        self.back_button = ttk.Button(
+            left_buttons, 
             text="← Back",
             command=lambda: controller.show_frame("LoadFrame")
         )
-        back_button.pack()
+        self.back_button.pack(side=tk.LEFT)
+        
+        # Right side buttons
+        # Botones del lado derecho
+        right_buttons = ttk.Frame(button_frame)
+        right_buttons.pack(side=tk.RIGHT, fill=tk.X)
+        
+        # Process button (right side)
+        # Botón procesar (lado derecho)
+        self.process_button = ttk.Button(
+            right_buttons, 
+            text="Crop Point Cloud",
+            command=self._process_crop
+        )
+        self.process_button.pack(side=tk.LEFT)
+        
+        # Next button (initially disabled)
+        # Botón siguiente (inicialmente deshabilitado)
+        self.next_button = ttk.Button(
+            right_buttons, 
+            text="Next →",
+            command=lambda: controller.show_frame("ClassificationFrame"),
+            state="disabled"
+        )
+        self.next_button.pack(side=tk.LEFT, padx=(10, 0))
+        
+        # Results frame (initially hidden)
+        # Marco de resultados (inicialmente oculto)
+        self.results_frame = ttk.LabelFrame(
+            self.content_frame,
+            text="Processing Results",
+            padding=10
+        )
+        
+        # Define result label references for later updating
+        # Definir referencias de etiquetas de resultados para actualización posterior
+        self.result_labels = {}
+    
+    def _process_crop(self):
+        """
+        Process the point cloud cropping based on parameters.
+        
+        Procesa el recorte de la nube de puntos según los parámetros.
+        """
+        # Check if we have a raw file to process
+        # Verificar si tenemos un archivo sin procesar para procesar
+        if not self.controller.raw_file_link.get():
+            self.update_status("No point cloud file loaded. Go back and load a file first.", False)
+            return
+        
+        # Get parameters from form
+        # Obtener parámetros del formulario
+        center_x = self.x_center.get()
+        center_y = self.y_center.get()
+        radius = self.radius.get()
+        
+        # Validate parameters
+        # Validar parámetros
+        if radius <= 0:
+            self.update_status("Radius must be positive", False)
+            return
+        
+        # Set input and output paths
+        # Establecer rutas de entrada y salida
+        input_file = self.controller.raw_file_link.get()
+        
+        # If the link is a reference file, get the actual path
+        # Si el enlace es un archivo de referencia, obtener la ruta real
+        if input_file.endswith('.reference'):
+            with open(input_file, 'r') as f:
+                input_file = f.read().strip()
+        
+        # Set output path in the project structure
+        # Establecer ruta de salida en la estructura del proyecto
+        base_name = os.path.basename(input_file)
+        name_without_ext = os.path.splitext(base_name)[0]
+        output_file = os.path.join(
+            self.controller.project_dir.get(),
+            "processed",
+            "cropped",
+            f"{name_without_ext}_cropped.las"
+        )
+        
+        # Update status and show progress animation
+        # Actualizar estado y mostrar animación de progreso
+        self.update_status("Processing point cloud crop...", None)
+        
+        # Start processing in a separate thread to keep UI responsive
+        # Iniciar procesamiento en un hilo separado para mantener la interfaz responsiva
+        thread = threading.Thread(
+            target=self._run_processing,
+            args=(input_file, output_file, center_x, center_y, radius)
+        )
+        thread.daemon = True
+        thread.start()
+    
+    def _run_processing(self, input_file, output_file, center_x, center_y, radius):
+        """
+        Run the processing operation in a separate thread.
+        
+        Ejecutar la operación de procesamiento en un hilo separado.
+        
+        Args:
+            input_file: Path to input file
+            output_file: Path to output file
+            center_x: X coordinate of center
+            center_y: Y coordinate of center
+            radius: Radius of circle
+        """
+        try:
+            # Update progress intermittently
+            # Actualizar progreso intermitentemente
+            for i in range(0, 101, 10):
+                if i == 0:
+                    # Starting...
+                    # Iniciando...
+                    self.controller.update_progress(i)
+                elif i < 30:
+                    # Reading file
+                    # Leyendo archivo
+                    self.controller.update_progress(i, "Reading point cloud...")
+                    time.sleep(0.2)  # Simulate processing time
+                elif i < 70:
+                    # Processing
+                    # Procesando
+                    self.controller.update_progress(i, "Applying circular crop...")
+                    time.sleep(0.3)  # Simulate processing time
+                elif i < 90:
+                    # Saving
+                    # Guardando
+                    self.controller.update_progress(i, "Writing cropped point cloud...")
+                    time.sleep(0.2)  # Simulate processing time
+                else:
+                    # Finishing
+                    # Finalizando
+                    self.controller.update_progress(i, "Finalizing...")
+                    time.sleep(0.1)  # Simulate processing time
+            
+            # Perform the actual cropping operation
+            # Realizar la operación de recorte real
+            stats = crop_circular_plot(
+                input_file,
+                output_file,
+                center_x,
+                center_y,
+                radius
+            )
+            
+            # Reset progress
+            # Reiniciar progreso
+            self.controller.update_progress(0)
+            
+            # Show success message with results
+            # Mostrar mensaje de éxito con resultados
+            self._show_results(stats, output_file)
+            
+        except Exception as e:
+            # Show error
+            # Mostrar error
+            self.controller.update_progress(0)
+            self.update_status(f"Error during crop: {str(e)}", False)
+    
+    def _show_results(self, stats, output_file):
+        """
+        Display processing results.
+        
+        Muestra resultados del procesamiento.
+        
+        Args:
+            stats: Statistics from processing
+            output_file: Path to output file
+        """
+        # Clear any previous results
+        # Limpiar resultados previos
+        if hasattr(self, 'results_frame') and self.results_frame.winfo_ismapped():
+            self.results_frame.pack_forget()
+            for widget in self.results_frame.winfo_children():
+                widget.destroy()
+        
+        # Setup results frame
+        # Configurar marco de resultados
+        self.results_frame.pack(fill=tk.X, padx=20, pady=(10, 0))
+        
+        # Add result information
+        # Añadir información de resultados
+        result_items = [
+            ("Total points", f"{stats['total_points']:,}"),
+            ("Points kept", f"{stats['percent_kept']:.1f}%"),
+            ("Area", f"{stats['area_m2']:.1f} m²"),
+            ("Density", f"{stats['density_pts_m2']:.1f} points/m²"),
+            ("Output file", os.path.basename(output_file)),
+        ]
+        
+        # Create grid of results
+        # Crear cuadrícula de resultados
+        for i, (label, value) in enumerate(result_items):
+            name_label = ttk.Label(self.results_frame, text=label, font=("Arial", 10))
+            name_label.grid(row=i, column=0, sticky="w", padx=5, pady=2)
+            
+            value_label = ttk.Label(self.results_frame, text=value, font=("Arial", 10, "bold"))
+            value_label.grid(row=i, column=1, sticky="w", padx=5, pady=2)
+            
+            # Store reference
+            # Almacenar referencia
+            self.result_labels[label] = value_label
+        
+        # Add preview button for the cropped point cloud
+        # Añadir botón de previsualización para la nube de puntos recortada
+        preview_button = ttk.Button(
+            self.results_frame,
+            text="Preview cropped result",
+            command=lambda: self._preview_cropped_point_cloud(output_file)
+        )
+        preview_button.grid(row=len(result_items), column=0, columnspan=2, pady=(10, 5))
+        
+        # Update status and enable the next button
+        # Actualizar estado y habilitar el botón siguiente
+        self.update_status("Point cloud successfully cropped! You can proceed to the next step.", True)
+        self.next_button.config(state="normal")
+    
+    def _preview_cropped_point_cloud(self, output_file):
+        """
+        Visualizes the cropped point cloud in a separate Open3D window.
+        
+        Visualiza la nube de puntos recortada en una ventana separada de Open3D.
+        """
+        self.update_status("Opening cropped point cloud preview...", None)
+        
+        # Import visualization in method to avoid circular imports
+        # Importar visualización en el método para evitar importaciones circulares
+        from src import visualization
+        
+        # Run visualization in a separate thread to keep UI responsive
+        # Ejecutar visualización en un hilo separado para mantener la interfaz responsiva
+        def run_visualization():
+            try:
+                # Load the cropped point cloud
+                # Cargar la nube de puntos recortada
+                points, _ = io.load_point_cloud(output_file)
+                
+                # Downsample for preview if needed
+                # Submuestrear para previsualización si es necesario
+                if len(points) > 500000:
+                    self.update_status("Downsampling cropped point cloud for preview...", None)
+                    points = visualization.downsample_point_cloud(points, target_points=500000)
+                
+                # Visualize the point cloud
+                # Visualizar la nube de puntos
+                file_name = os.path.basename(output_file)
+                window_title = f"LiDAR PlotSafe - Preview: {file_name}"
+                visualization.visualize_point_cloud(points, title=window_title)
+                
+                # Update status when visualization window is closed
+                # Actualizar estado cuando se cierre la ventana de visualización
+                self.update_status(f"Preview closed: {file_name}", None)
+                
+            except Exception as e:
+                error_msg = f"Error in visualization: {str(e)}"
+                print(error_msg)
+                traceback.print_exc()
+                self.update_status(error_msg, False)
+        
+        # Start visualization thread
+        # Iniciar hilo de visualización
+        threading.Thread(target=run_visualization).start()
+    
+    def update_status(self, message, success=None):
+        """
+        Updates the status message.
+        
+        Actualiza el mensaje de estado.
+        
+        Args:
+            message: Message to display.
+            success: True if the operation was successful, False if it failed, None for neutral state.
+        """
+        # Show status message and set color based on success
+        # Mostrar mensaje de estado y establecer color según el éxito
+        self.status_label["text"] = message
+        
+        if success is True:
+            self.status_label["foreground"] = "green"
+        elif success is False:
+            self.status_label["foreground"] = "red"
+        else:
+            self.status_label["foreground"] = self.controller.ACCENT_COLOR
+            
+        # Ensure the status label is visible
+        # Asegurar que la etiqueta de estado sea visible
+        if not self.status_label.winfo_ismapped():
+            self.status_label.pack(fill=tk.X)
+    
+    def update_progress(self, value):
+        """
+        Updates the progress bar.
+        
+        Actualiza la barra de progreso.
+        
+        Args:
+            value: Value of the progress bar (0-100).
+        """
+        # Update progress bar value
+        # Actualizar valor de la barra de progreso
+        self.progress_bar["value"] = value
+        
+        # Show/hide percentage label based on progress
+        # Mostrar/ocultar etiqueta de porcentaje según el progreso
+        if value > 0:
+            self.percentage_label["text"] = f"{int(value)}%"
+            if not self.percentage_label.winfo_ismapped():
+                self.percentage_label.pack(side=tk.RIGHT, padx=(5, 0))
+        else:
+            if self.percentage_label.winfo_ismapped():
+                self.percentage_label.pack_forget()
+
+
+class ClassificationFrame(ttk.Frame):
+    """
+    Frame for point cloud classification and analysis.
+    
+    Marco para clasificación y análisis de nube de puntos.
+    """
+    
+    def __init__(self, parent, controller):
+        """
+        Initializes the classification frame.
+        
+        Inicializa el marco de clasificación.
+        
+        Args:
+            parent: Parent widget.
+            controller: Main application controller.
+        """
+        super().__init__(parent)
+        self.controller = controller
+        
+        # Create content frame with proper styling
+        # Crear marco de contenido con estilo adecuado
+        self.content_frame = ttk.Frame(self)
+        self.content_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Title for the classification section
+        # Título para la sección de clasificación
+        title_label = ttk.Label(
+            self.content_frame,
+            text="LiDAR Classification Module",
+            font=("Arial", 14, "bold"),
+            foreground=self.controller.TEXT_COLOR,
+            background=self.controller.CONTENT_COLOR
+        )
+        title_label.pack(pady=(5, 15))
+        
+        # Australian English message about future module
+        # Mensaje en inglés australiano sobre el módulo futuro
+        message_frame = ttk.Frame(self.content_frame, style="TFrame")
+        message_frame.pack(fill=tk.BOTH, expand=True, padx=50, pady=20)
+        
+        message_label = ttk.Label(
+            message_frame,
+            text=(
+                "G'day! This section will soon feature our advanced LiDAR classification module.\n\n"
+                "Once implemented, you'll be able to segment your plot into individual trees, "
+                "calculate trunk diameters and heights, and estimate timber volume with ripper accuracy.\n\n"
+                "We're currently working flat out to bring you these bonza features in our next update.\n\n"
+                "Check back soon, mate!"
+            ),
+            font=("Arial", 11),
+            justify="center",
+            foreground=self.controller.TEXT_COLOR,
+            background=self.controller.CONTENT_COLOR,
+            wraplength=500
+        )
+        message_label.pack(pady=20)
+        
+        # Navigation buttons at the bottom
+        # Botones de navegación en la parte inferior
+        button_frame = ttk.Frame(self.content_frame)
+        button_frame.pack(fill=tk.X, padx=50, pady=20)
+        
+        # Back button
+        # Botón volver
+        self.back_button = ttk.Button(
+            button_frame, 
+            text="← Back",
+            command=lambda: controller.show_frame("ParametersFrame")
+        )
+        self.back_button.pack(side=tk.LEFT)
+        
+        # Status message (initially empty)
+        # Mensaje de estado (inicialmente vacío)
+        self.status_label = ttk.Label(
+            self.content_frame, 
+            text="",
+            font=("Arial", 11),
+            foreground=self.controller.ACCENT_COLOR,
+            background=self.controller.CONTENT_COLOR,
+            borderwidth=1,
+            relief="solid",
+            padding=5,
+            anchor="center",
+            justify="center"
+        )
+        self.status_label.pack(fill=tk.X, padx=20, pady=(15, 5))
+        self.status_label.pack_forget()  # Hidden initially
+    
+    def update_status(self, message, success=None):
+        """
+        Updates the status message.
+        
+        Actualiza el mensaje de estado.
+        
+        Args:
+            message: Message to display.
+            success: True if the operation was successful, False if it failed, None for neutral state.
+        """
+        if not message:
+            self.status_label.pack_forget()
+            return
+            
+        self.status_label.pack(fill=tk.X, padx=20, pady=(15, 5))
+        self.status_label.config(text=message)
+        
+        if success is True:
+            self.status_label.config(foreground="green")
+        elif success is False:
+            self.status_label.config(foreground="red")
+        else:
+            self.status_label.config(foreground=self.controller.ACCENT_COLOR)
 
 
 def main():

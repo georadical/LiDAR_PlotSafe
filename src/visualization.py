@@ -8,6 +8,15 @@ Módulo de visualización para LiDAR PlotSafe.
 import numpy as np
 import open3d as o3d
 import logging
+import threading
+import traceback
+import multiprocessing
+import os
+
+# Set multiprocessing start method to 'spawn' for Windows compatibility
+# Configurar método de inicio de multiprocessing a 'spawn' para compatibilidad con Windows
+if __name__ == "__main__" and multiprocessing.get_start_method() != 'spawn':
+    multiprocessing.set_start_method('spawn', force=True)
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +73,87 @@ def downsample_point_cloud(points, target_points=500000):
     
     return downsampled_points
 
+# Define visualization function at module level for multiprocessing compatibility
+# Definir función de visualización a nivel de módulo para compatibilidad con multiprocessing
+def _run_visualization_process(points_data, window_title, point_size):
+    """
+    Run visualization in a separate process.
+    
+    Ejecutar visualización en un proceso separado.
+    
+    Args:
+        points_data (numpy.ndarray): Points array
+        window_title (str): Window title
+        point_size (float): Size of points to display
+    """
+    try:
+        # Create point cloud in separate process
+        # Crear nube de puntos en proceso separado
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(points_data)
+        
+        # Apply colorful visualization using height (Z coordinate) for color mapping
+        # Aplicar visualización colorida usando la altura (coordenada Z) para mapeo de colores
+        if len(points_data) > 0:
+            # Get Z coordinates for color mapping
+            # Obtener coordenadas Z para mapeo de colores
+            z = points_data[:, 2]
+            
+            # Normalize Z values between 0 and 1
+            # Normalizar valores Z entre 0 y 1
+            min_z = np.min(z)
+            max_z = np.max(z)
+            if max_z > min_z:
+                normalized_z = (z - min_z) / (max_z - min_z)
+            else:
+                normalized_z = np.zeros_like(z)
+            
+            # Create colormap: blue for low values, red for high values
+            # Crear mapa de colores: azul para valores bajos, rojo para valores altos
+            colors = np.zeros((len(normalized_z), 3))
+            
+            # Create a colorful rainbow effect
+            # Crear un efecto arcoíris colorido
+            colors[:, 0] = np.abs(np.sin(normalized_z * np.pi))  # Red
+            colors[:, 1] = np.abs(np.sin(normalized_z * np.pi + 2*np.pi/3))  # Green
+            colors[:, 2] = np.abs(np.sin(normalized_z * np.pi + 4*np.pi/3))  # Blue
+            
+            pcd.colors = o3d.utility.Vector3dVector(colors)
+        else:
+            # Fallback to blue if no points
+            # Usar azul si no hay puntos
+            pcd.paint_uniform_color([0.5, 0.5, 0.8])
+        
+        # Use standard visualization that doesn't affect main app DPI
+        # Usar visualización estándar que no afecta el DPI de la aplicación principal
+        print(f"Visualizing point cloud with {len(points_data):,} points in separate process (PID: {os.getpid()})")
+        
+        # Create a custom visualizer to control point size properly
+        # Crear un visualizador personalizado para controlar el tamaño de punto correctamente
+        vis = o3d.visualization.Visualizer()
+        vis.create_window(window_name=window_title, width=1024, height=768)
+        vis.add_geometry(pcd)
+        
+        # Set rendering options including point size
+        # Establecer opciones de renderizado incluyendo tamaño de punto
+        opt = vis.get_render_option()
+        opt.point_size = float(point_size)
+        opt.background_color = np.asarray([0.1, 0.1, 0.1])  # Dark gray background
+        
+        # Reset view to fit geometry
+        # Resetear vista para ajustar geometría
+        vis.reset_view_point(True)
+        
+        # Run the visualizer
+        # Ejecutar el visualizador
+        vis.run()
+        vis.destroy_window()
+        
+    except Exception as e:
+        print(f"Error in visualization process: {e}")
+        traceback.print_exc()
+
+
 def visualize_point_cloud(points, title="LiDAR PlotSafe - Point Cloud Preview", point_size=1):
     """
     Visualize a point cloud in an Open3D window.
@@ -75,32 +165,30 @@ def visualize_point_cloud(points, title="LiDAR PlotSafe - Point Cloud Preview", 
         title (str): Window title
         point_size (float): Size of points to display
     """
-    # Create Open3D point cloud object
-    # Crear objeto de nube de puntos Open3D
-    pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(points)
-    
-    # Create visualization window
-    # Crear ventana de visualización
-    vis = o3d.visualization.Visualizer()
-    vis.create_window(title, width=1024, height=768)
-    
-    # Add geometry to the visualizer
-    # Añadir geometría al visualizador
-    vis.add_geometry(pcd)
-    
-    # Set rendering options
-    # Establecer opciones de renderizado
-    opt = vis.get_render_option()
-    opt.point_size = point_size
-    opt.background_color = np.asarray([0.1, 0.1, 0.1])  # Dark gray background
-    
-    # Set initial camera position
-    # Establecer posición inicial de la cámara
-    view_control = vis.get_view_control()
-    view_control.set_zoom(0.8)
-    
-    # Display the visualization
-    # Mostrar la visualización
-    vis.run()
-    vis.destroy_window()
+    # Start visualization in separate process
+    # Iniciar visualización en proceso separado
+    try:
+        # Convert points to numpy array for passing between processes
+        # Convertir puntos a array numpy para pasar entre procesos
+        points_array = np.asarray(points)
+        
+        # Initialize multiprocessing if needed
+        # Inicializar multiprocessing si es necesario
+        if multiprocessing.get_start_method() != 'spawn':
+            multiprocessing.set_start_method('spawn', force=True)
+        
+        # Create and start process
+        # Crear e iniciar proceso
+        process = multiprocessing.Process(
+            target=_run_visualization_process, 
+            args=(points_array, title, point_size)
+        )
+        process.daemon = True  # Process will terminate when main program exits
+        process.start()
+        
+        logger.info(f"Started point cloud visualization in separate process with {len(points):,} points")
+        return process
+    except Exception as e:
+        logger.error(f"Failed to start visualization process: {e}")
+        traceback.print_exc()
+        return None
