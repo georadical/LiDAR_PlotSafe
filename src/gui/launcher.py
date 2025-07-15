@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
- 2025 LiDAR PlotSafe Project. All rights reserved.
+© 2025 LiDAR PlotSafe Project. All rights reserved.
 
 Launcher GUI for LiDAR PlotSafe processing pipeline.
 
