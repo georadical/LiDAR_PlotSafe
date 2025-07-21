@@ -99,7 +99,7 @@ class LiDARPlotSafeLauncher(tk.Tk):
         # Create frames for different views
         # Crear marcos para diferentes vistas
         self.frames = {}
-        for F in (LoadFrame, ParametersFrame, ClassificationFrame):
+        for F in (LoadFrame, ParametersFrame, SegmentationParametersFrame, ClassificationFrame):
             frame = F(content_frame, self)
             self.frames[F.__name__] = frame
             frame.pack(fill=tk.BOTH, expand=True)
@@ -1242,7 +1242,659 @@ class ParametersFrame(ttk.Frame):
             if self.percentage_label.winfo_ismapped():
                 self.percentage_label.pack_forget()
 
+class SegmentationParametersFrame(ttk.Frame):
+    """
+    Frame for configuring tree segmentation parameters.
+    
+    Frame para configurar los parámetros de segmentación de árboles.
+    """
+    
+    def __init__(self, parent, controller):
+        """
+        Initializes the tree segmentation parameters frame.
+        
+        Inicializa el marco de parámetros de segmentación de árboles.
+        
+        Args:
+            parent: Parent widget.
+            controller: Main application controller.
+        """
+        super().__init__(parent)
+        self.controller = controller
+        
+        # Status message frame (at the bottom of the window)
+        # Marco de mensaje de estado (en la parte inferior de la ventana)
+        status_frame = ttk.Frame(self)
+        status_frame.pack(fill=tk.X, side=tk.BOTTOM, padx=20, pady=10)
+        
+        # Status message (initially empty)
+        # Mensaje de estado (inicialmente vacío)
+        self.status_label = ttk.Label(
+            status_frame, 
+            text="",
+            font=("Arial", 11),
+            foreground=self.controller.ACCENT_COLOR,
+            background=self.controller.CONTENT_COLOR,
+            borderwidth=1,
+            relief="solid",
+            padding=5,
+            anchor="center",
+            justify="center"
+        )
+        self.status_label.pack(fill=tk.X)
+        self.status_label.pack_forget()  # Hidden initially
+        
+        # Create content frame with proper styling
+        # Crear marco de contenido con estilo adecuado
+        self.content_frame = ttk.Frame(self)
+        self.content_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Title for the segmentation parameters section
+        # Título para la sección de parámetros de segmentación
+        title_label = ttk.Label(
+            self.content_frame,
+            text="Tree Segmentation Parameters",
+            font=("Arial", 14, "bold"),
+            foreground=self.controller.TEXT_COLOR,
+            background=self.controller.CONTENT_COLOR
+        )
+        title_label.pack(pady=(5, 15))
+        
+        # Instructions label
+        # Etiqueta de instrucciones
+        instructions = ttk.Label(
+            self.content_frame,
+            text="Configure parameters for tree segmentation in your point cloud.\nThese settings affect how individual trees are detected in the plot.",
+            justify="center",
+            background=self.controller.CONTENT_COLOR
+        )
+        instructions.pack(pady=(0, 15))
+        
+        # Create a notebook for organizing parameter groups
+        # Crear un notebook para organizar grupos de parámetros
+        self.notebook = ttk.Notebook(self.content_frame)
+        self.notebook.pack(fill=tk.BOTH, expand=True, padx=20, pady=5)
+        
+        # Create frames for different parameter categories
+        # Crear marcos para diferentes categorías de parámetros
+        self.downsampling_frame = ttk.Frame(self.notebook)
+        self.clustering_frame = ttk.Frame(self.notebook)
+        self.filtering_frame = ttk.Frame(self.notebook)
+        
+        # Add frames to notebook with tabs
+        # Añadir marcos al notebook con pestañas
+        self.notebook.add(self.downsampling_frame, text="Downsampling")
+        self.notebook.add(self.clustering_frame, text="Clustering")
+        self.notebook.add(self.filtering_frame, text="Tree Filtering")
+        
+        # Configure parameter variables
+        # Configurar variables de parámetros
+        self.voxel_size = tk.DoubleVar(value=0.05)  # Default voxel size in meters
+        self.eps = tk.DoubleVar(value=0.2)  # Default eps for DBSCAN in meters
+        self.min_samples = tk.IntVar(value=5)  # Default min_samples for DBSCAN
+        self.slice_height = tk.DoubleVar(value=1.3)  # Default height of horizontal slice (DBH height) in meters
+        self.slice_thickness = tk.DoubleVar(value=0.2)  # Default thickness of horizontal slice in meters
+        self.min_tree_height = tk.DoubleVar(value=1.5)  # Default minimum tree height in meters
+        self.min_points = tk.IntVar(value=50)  # Default minimum points per tree
+        
+        # Create form fields for downsampling parameters
+        # Crear campos de formulario para parámetros de submuestreo
+        self._create_downsampling_form()
+        
+        # Create form fields for clustering parameters
+        # Crear campos de formulario para parámetros de clustering
+        self._create_clustering_form()
+        
+        # Create form fields for tree filtering parameters
+        # Crear campos de formulario para parámetros de filtrado de árboles
+        self._create_filtering_form()
+        
+        # Progress bar and percentage in same frame
+        # Barra de progreso y porcentaje en el mismo frame
+        progress_frame = ttk.Frame(self.content_frame)
+        progress_frame.pack(fill=tk.X, padx=50, pady=(15, 15))
 
+        self.progress_bar = ttk.Progressbar(
+            progress_frame, 
+            orient="horizontal", 
+            length=450,
+            mode="determinate"
+        )
+        self.progress_bar.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # Percentage label positioned to the right of progress bar
+        # Etiqueta de porcentaje posicionada a la derecha de la barra de progreso
+        self.percentage_label = ttk.Label(
+            progress_frame,
+            text="0%",
+            font=("Arial", 10, "bold"),
+            foreground="green",
+            width=5
+        )
+        self.percentage_label.pack(side=tk.RIGHT, padx=(5, 0))
+        self.percentage_label.pack_forget()  # Initially hidden
+        
+        # Navigation buttons at the bottom
+        # Botones de navegación en la parte inferior
+        button_frame = ttk.Frame(self.content_frame)
+        button_frame.pack(fill=tk.X, padx=50, pady=20)
+        
+        # Left side buttons
+        # Botones del lado izquierdo
+        left_buttons = ttk.Frame(button_frame)
+        left_buttons.pack(side=tk.LEFT, fill=tk.X)
+        
+        # Back button (left side)
+        # Botón volver (lado izquierdo)
+        self.back_button = ttk.Button(
+            left_buttons, 
+            text="← Back",
+            command=lambda: controller.show_frame("ParametersFrame")
+        )
+        self.back_button.pack(side=tk.LEFT)
+        
+        # Right side buttons
+        # Botones del lado derecho
+        right_buttons = ttk.Frame(button_frame)
+        right_buttons.pack(side=tk.RIGHT, fill=tk.X)
+        
+        # Process button (right side)
+        # Botón procesar (lado derecho)
+        self.process_button = ttk.Button(
+            right_buttons, 
+            text="Run Tree Segmentation",
+            command=self._process_segmentation
+        )
+        self.process_button.pack(side=tk.LEFT)
+        
+        # Next button (initially disabled)
+        # Botón siguiente (inicialmente deshabilitado)
+        self.next_button = ttk.Button(
+            right_buttons, 
+            text="Next →",
+            command=lambda: controller.show_frame("ClassificationFrame"),
+            state="disabled"
+        )
+        self.next_button.pack(side=tk.LEFT, padx=(10, 0))
+        
+        # Results frame (initially hidden)
+        # Marco de resultados (inicialmente oculto)
+        self.results_frame = ttk.LabelFrame(
+            self.content_frame,
+            text="Segmentation Results",
+            padding=10
+        )
+        
+        # Define result label references for later updating
+        # Definir referencias de etiquetas de resultados para actualización posterior
+        self.result_labels = {}
+
+    def _create_downsampling_form(self):
+        """
+        Creates form elements for downsampling parameters.
+        
+        Crea elementos de formulario para parámetros de submuestreo.
+        """
+        # Voxel size parameter
+        # Parámetro de tamaño de voxel
+        voxel_frame = ttk.Frame(self.downsampling_frame)
+        voxel_frame.pack(fill=tk.X, pady=15, padx=20)
+        
+        voxel_label = ttk.Label(
+            voxel_frame,
+            text="Voxel size (m):",
+            width=25,
+            anchor="e"
+        )
+        voxel_label.pack(side=tk.LEFT, padx=(0, 5))
+        
+        voxel_entry = ttk.Entry(
+            voxel_frame,
+            textvariable=self.voxel_size,
+            width=15
+        )
+        voxel_entry.pack(side=tk.LEFT)
+        
+        voxel_info = ttk.Label(
+            self.downsampling_frame,
+            text="Smaller values preserve more detail but increase processing time.\nRecommended range: 0.01 - 0.1 meters.",
+            font=("Arial", 9, "italic"),
+            foreground="gray"
+        )
+        voxel_info.pack(padx=20, pady=(0, 10))
+    
+    def _create_clustering_form(self):
+        """
+        Creates form elements for clustering parameters.
+        
+        Crea elementos de formulario para parámetros de clustering.
+        """
+        # DBSCAN eps parameter
+        # Parámetro eps de DBSCAN
+        eps_frame = ttk.Frame(self.clustering_frame)
+        eps_frame.pack(fill=tk.X, pady=(15, 5), padx=20)
+        
+        eps_label = ttk.Label(
+            eps_frame,
+            text="DBSCAN distance (eps, m):",
+            width=25,
+            anchor="e"
+        )
+        eps_label.pack(side=tk.LEFT, padx=(0, 5))
+        
+        eps_entry = ttk.Entry(
+            eps_frame,
+            textvariable=self.eps,
+            width=15
+        )
+        eps_entry.pack(side=tk.LEFT)
+        
+        # DBSCAN min_samples parameter
+        # Parámetro min_samples de DBSCAN
+        min_samples_frame = ttk.Frame(self.clustering_frame)
+        min_samples_frame.pack(fill=tk.X, pady=5, padx=20)
+        
+        min_samples_label = ttk.Label(
+            min_samples_frame,
+            text="Min. points per cluster:",
+            width=25,
+            anchor="e"
+        )
+        min_samples_label.pack(side=tk.LEFT, padx=(0, 5))
+        
+        min_samples_entry = ttk.Entry(
+            min_samples_frame,
+            textvariable=self.min_samples,
+            width=15
+        )
+        min_samples_entry.pack(side=tk.LEFT)
+        
+        # Slice height parameter
+        # Parámetro de altura de rebanada
+        slice_height_frame = ttk.Frame(self.clustering_frame)
+        slice_height_frame.pack(fill=tk.X, pady=5, padx=20)
+        
+        slice_height_label = ttk.Label(
+            slice_height_frame,
+            text="Horizontal slice height (m):",
+            width=25,
+            anchor="e"
+        )
+        slice_height_label.pack(side=tk.LEFT, padx=(0, 5))
+        
+        slice_height_entry = ttk.Entry(
+            slice_height_frame,
+            textvariable=self.slice_height,
+            width=15
+        )
+        slice_height_entry.pack(side=tk.LEFT)
+        
+        # Slice thickness parameter
+        # Parámetro de grosor de rebanada
+        slice_thickness_frame = ttk.Frame(self.clustering_frame)
+        slice_thickness_frame.pack(fill=tk.X, pady=5, padx=20)
+        
+        slice_thickness_label = ttk.Label(
+            slice_thickness_frame,
+            text="Slice thickness (m):",
+            width=25,
+            anchor="e"
+        )
+        slice_thickness_label.pack(side=tk.LEFT, padx=(0, 5))
+        
+        slice_thickness_entry = ttk.Entry(
+            slice_thickness_frame,
+            textvariable=self.slice_thickness,
+            width=15
+        )
+        slice_thickness_entry.pack(side=tk.LEFT)
+        
+        # Information about clustering parameters
+        # Información sobre parámetros de clustering
+        clustering_info = ttk.Label(
+            self.clustering_frame,
+            text="The horizontal slice is taken at the specified height (typically DBH height, 1.3m).\nClustering is performed on this slice to identify tree trunks.",
+            font=("Arial", 9, "italic"),
+            foreground="gray"
+        )
+        clustering_info.pack(padx=20, pady=(5, 10))
+    
+    def _create_filtering_form(self):
+        """
+        Creates form elements for tree filtering parameters.
+        
+        Crea elementos de formulario para parámetros de filtrado de árboles.
+        """
+        # Minimum tree height parameter
+        # Parámetro de altura mínima de árbol
+        min_height_frame = ttk.Frame(self.filtering_frame)
+        min_height_frame.pack(fill=tk.X, pady=(15, 5), padx=20)
+        
+        min_height_label = ttk.Label(
+            min_height_frame,
+            text="Min. tree height (m):",
+            width=25,
+            anchor="e"
+        )
+        min_height_label.pack(side=tk.LEFT, padx=(0, 5))
+        
+        min_height_entry = ttk.Entry(
+            min_height_frame,
+            textvariable=self.min_tree_height,
+            width=15
+        )
+        min_height_entry.pack(side=tk.LEFT)
+        
+        # Minimum points per tree parameter
+        # Parámetro de puntos mínimos por árbol
+        min_points_frame = ttk.Frame(self.filtering_frame)
+        min_points_frame.pack(fill=tk.X, pady=5, padx=20)
+        
+        min_points_label = ttk.Label(
+            min_points_frame,
+            text="Min. points per tree:",
+            width=25,
+            anchor="e"
+        )
+        min_points_label.pack(side=tk.LEFT, padx=(0, 5))
+        
+        min_points_entry = ttk.Entry(
+            min_points_frame,
+            textvariable=self.min_points,
+            width=15
+        )
+        min_points_entry.pack(side=tk.LEFT)
+        
+        # Information about filtering parameters
+        # Información sobre parámetros de filtrado
+        filtering_info = ttk.Label(
+            self.filtering_frame,
+            text="Tree height is calculated using the full point cloud around each cluster.\nClusters that don't meet these minimums will be filtered out.",
+            font=("Arial", 9, "italic"),
+            foreground="gray"
+        )
+        filtering_info.pack(padx=20, pady=(5, 10))
+    
+    def _process_segmentation(self):
+        """
+        Process tree segmentation based on parameters.
+        
+        Procesa la segmentación de árboles según los parámetros.
+        """
+        # Check if we have a cropped file to process
+        # Verificar si tenemos un archivo recortado para procesar
+        if not hasattr(self.controller, 'cropped_file_path') or not self.controller.cropped_file_path:
+            self.update_status("No cropped point cloud available. Complete the previous step first.", False)
+            return
+        
+        # Get parameters from form
+        # Obtener parámetros del formulario
+        voxel_size = self.voxel_size.get()
+        eps = self.eps.get()
+        min_samples = self.min_samples.get()
+        slice_height = self.slice_height.get()
+        slice_thickness = self.slice_thickness.get()
+        min_tree_height = self.min_tree_height.get()
+        min_points = self.min_points.get()
+        
+        # Validate parameters
+        # Validar parámetros
+        if voxel_size <= 0:
+            self.update_status("Voxel size must be positive", False)
+            return
+        if eps <= 0:
+            self.update_status("DBSCAN distance must be positive", False)
+            return
+        if min_samples <= 0:
+            self.update_status("Min points per cluster must be positive", False)
+            return
+        if slice_thickness <= 0:
+            self.update_status("Slice thickness must be positive", False)
+            return
+        if min_tree_height <= 0:
+            self.update_status("Min tree height must be positive", False)
+            return
+        if min_points <= 0:
+            self.update_status("Min points per tree must be positive", False)
+            return
+        
+        # Set input and output paths
+        # Establecer rutas de entrada y salida
+        input_file = self.controller.cropped_file_path
+        
+        # Set output path in the project structure
+        # Establecer ruta de salida en la estructura del proyecto
+        base_name = os.path.basename(input_file)
+        name_without_ext = os.path.splitext(base_name)[0]
+        output_file = os.path.join(
+            self.controller.project_dir.get(),
+            "processed",
+            "trees",
+            f"{name_without_ext}_trees.las"
+        )
+        
+        # Update status and show progress animation
+        # Actualizar estado y mostrar animación de progreso
+        self.update_status("Processing tree segmentation...", None)
+        
+        # Start processing in a separate thread to keep UI responsive
+        # Iniciar procesamiento en un hilo separado para mantener la interfaz responsiva
+        thread = threading.Thread(
+            target=self._run_processing,
+            args=(input_file, output_file, voxel_size, eps, min_samples, 
+                  slice_height, slice_thickness, min_tree_height, min_points)
+        )
+        thread.daemon = True
+        thread.start()
+    
+    def _run_processing(self, input_file, output_file, voxel_size, eps, min_samples, 
+                       slice_height, slice_thickness, min_tree_height, min_points):
+        """
+        Run the segmentation processing operation in a separate thread.
+        
+        Ejecutar la operación de procesamiento de segmentación en un hilo separado.
+        
+        Args:
+            input_file: Path to input file
+            output_file: Path to output file
+            voxel_size: Voxel size for downsampling
+            eps: DBSCAN distance parameter
+            min_samples: Minimum points per DBSCAN cluster
+            slice_height: Height of horizontal slice
+            slice_thickness: Thickness of horizontal slice
+            min_tree_height: Minimum tree height to keep
+            min_points: Minimum points per tree to keep
+        """
+        try:
+            # Import necessary modules
+            # Importar módulos necesarios
+            from src.pipeline.segmentation import segment_trees
+            
+            # Update progress intermittently
+            # Actualizar progreso intermitentemente
+            for i in range(0, 101, 10):
+                if i == 0:
+                    # Starting...
+                    # Iniciando...
+                    self.controller.update_progress(i)
+                elif i < 20:
+                    # Reading file
+                    # Leyendo archivo
+                    self.controller.update_progress(i, "Reading point cloud...")
+                    time.sleep(0.2)  # Simulate processing time
+                elif i < 40:
+                    # Downsampling
+                    # Submuestreando
+                    self.controller.update_progress(i, "Downsampling point cloud...")
+                    time.sleep(0.3)  # Simulate processing time
+                elif i < 60:
+                    # Clustering
+                    # Agrupando
+                    self.controller.update_progress(i, "Clustering tree trunks...")
+                    time.sleep(0.3)  # Simulate processing time
+                elif i < 80:
+                    # Filtering
+                    # Filtrando
+                    self.controller.update_progress(i, "Filtering tree clusters...")
+                    time.sleep(0.2)  # Simulate processing time
+                elif i < 90:
+                    # Saving
+                    # Guardando
+                    self.controller.update_progress(i, "Writing segmented trees...")
+                    time.sleep(0.2)  # Simulate processing time
+                else:
+                    # Finishing
+                    # Finalizando
+                    self.controller.update_progress(i, "Finalizing...")
+                    time.sleep(0.1)  # Simulate processing time
+            
+            # Perform the actual segmentation operation
+            # Realizar la operación de segmentación real
+            result = segment_trees(
+                input_file,
+                output_file,
+                voxel_size=voxel_size,
+                eps=eps,
+                min_samples=min_samples,
+                slice_height=slice_height,
+                slice_thickness=slice_thickness,
+                min_tree_height=min_tree_height,
+                min_points=min_points
+            )
+            
+            # Save the result in controller for later use
+            # Guardar el resultado en el controlador para uso posterior
+            self.controller.segmentation_result = result
+            self.controller.segmented_file_path = output_file
+            
+            # Reset progress
+            # Reiniciar progreso
+            self.controller.update_progress(0)
+            
+            # Show success message with results
+            # Mostrar mensaje de éxito con resultados
+            self._show_results(result, output_file)
+            
+        except Exception as e:
+            # Show error
+            # Mostrar error
+            self.controller.update_progress(0)
+            self.update_status(f"Error during segmentation: {str(e)}", False)
+            traceback.print_exc()
+    
+    def _show_results(self, result, output_file):
+        """
+        Display segmentation results.
+        
+        Muestra resultados de la segmentación.
+        
+        Args:
+            result: Results dictionary from segmentation
+            output_file: Path to output file
+        """
+        # Check if results frame exists
+        # Verificar si existe el marco de resultados
+        if not hasattr(self, 'results_frame') or not self.results_frame:
+            return
+            
+        # Show results frame
+        # Mostrar marco de resultados
+        self.results_frame.pack(fill=tk.X, padx=20, pady=10)
+            
+        # Clear previous results
+        # Limpiar resultados anteriores
+        for widget in self.results_frame.winfo_children():
+            widget.destroy()
+            
+        # Create result labels
+        # Crear etiquetas de resultados
+        num_trees = result.get("num_trees", 0)
+        total_points = result.get("total_points", 0)
+        
+        # Add file info
+        # Añadir información del archivo
+        file_label = ttk.Label(
+            self.results_frame,
+            text=f"Segmented trees saved to: {os.path.basename(output_file)}",
+            justify="left",
+            anchor="w"
+        )
+        file_label.grid(row=0, column=0, sticky="w", padx=5, pady=2)
+        
+        # Add trees info
+        # Añadir información de árboles
+        trees_label = ttk.Label(
+            self.results_frame,
+            text=f"Trees detected: {num_trees}",
+            justify="left",
+            anchor="w"
+        )
+        trees_label.grid(row=1, column=0, sticky="w", padx=5, pady=2)
+        
+        # Add points info
+        # Añadir información de puntos
+        points_label = ttk.Label(
+            self.results_frame,
+            text=f"Total points in trees: {total_points:,}",
+            justify="left",
+            anchor="w"
+        )
+        points_label.grid(row=2, column=0, sticky="w", padx=5, pady=2)
+        
+        # Enable next button
+        # Habilitar botón siguiente
+        self.next_button["state"] = "normal"
+        
+        # Show success message
+        # Mostrar mensaje de éxito
+        self.update_status(f"Tree segmentation completed successfully. {num_trees} trees detected.", True)
+    
+    def update_progress(self, value):
+        """
+        Updates the progress bar.
+        
+        Updates the progress bar.
+        
+        Args:
+            value: Value of the progress bar (0-100).
+        """
+        self.progress_bar["value"] = value
+        self.update_idletasks()
+        
+        # Only show percentage at 100%
+        if value == 100:
+            self.percentage_label["text"] = "100%"
+            self.percentage_label.pack(side=tk.RIGHT, padx=(5, 0))
+        else:
+            self.percentage_label.pack_forget()  # Hide percentage if not 100%
+    
+    def update_status(self, message, success=None):
+        """
+        Updates the status message.
+        
+        Updates the status message.
+        
+        Args:
+            message: Message to display.
+            success: True if the operation was successful, False if it failed, None for neutral state.
+        """
+        self.status_label["text"] = message
+        self.status_label["anchor"] = "center"  # Center text horizontally
+        self.status_label["justify"] = "center"  # Center multiline text
+        
+        if success is True:
+            self.status_label["foreground"] = "green"
+        elif success is False:
+            self.status_label["foreground"] = "red"
+        else:
+            self.status_label["foreground"] = self.controller.ACCENT_COLOR
+            
+        # Ensure the status label is visible
+        if not self.status_label.winfo_ismapped():
+            self.status_label.pack(fill=tk.X, padx=20, pady=(5, 10))
+            
+        self.update_idletasks()
+        
 class ClassificationFrame(ttk.Frame):
     """
     Frame for point cloud classification and analysis.

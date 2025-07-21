@@ -170,3 +170,83 @@ def get_supported_extensions() -> List[str]:
         List of supported file extensions (lowercase without dot)
     """
     return ['las', 'laz']
+
+def save_segmented_point_cloud(trees: List[np.ndarray], output_file: str) -> None:
+    """
+    Save segmented trees to a point cloud file.
+    
+    Guarda árboles segmentados en un archivo de nube de puntos.
+    
+    Args:
+        trees: List of arrays, each representing a tree as a set of points
+        output_file: Path where to save the segmented point cloud
+        
+    Raises:
+        ValueError: If the output format is not supported
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # Validate file extension
+    # Validar extensión del archivo
+    _, ext = os.path.splitext(output_file)
+    if ext.lower() not in ['.las', '.laz']:
+        raise ValueError(f"Unsupported output format: {ext}. Only .las and .laz files are supported.")
+    
+    try:
+        # Create a new LAS file with tree ID classification
+        # Crear un nuevo archivo LAS con clasificación de ID de árbol
+        
+        # First, combine all points and create a tree_id array
+        # Primero, combinar todos los puntos y crear un array de tree_id
+        all_points = []
+        tree_ids = []
+        
+        # IDs start from 1 as requested
+        # Los IDs comienzan desde 1 como se solicitó
+        for tree_id, tree_points in enumerate(trees, start=1):
+            all_points.append(tree_points)
+            tree_ids.extend([tree_id] * len(tree_points))
+        
+        if not all_points:
+            raise ValueError("No tree points to save")
+            
+        # Combine all points into a single array
+        # Combinar todos los puntos en un único array
+        points = np.vstack(all_points)
+        tree_ids = np.array(tree_ids)
+        
+        # Create a new LAS file with custom dimension for tree IDs
+        # Crear un nuevo archivo LAS con dimensión personalizada para IDs de árboles
+        header = laspy.LasHeader(point_format=3)
+        header.scales = [0.001, 0.001, 0.001]
+        
+        # Add custom dimension for tree_id with no limit (32-bit integer)
+        # Añadir dimensión personalizada para tree_id sin límite (entero de 32 bits)
+        extra_dims = [
+            laspy.ExtraBytesParams(name="tree_id", type="int32")
+        ]
+        header.add_extra_dims(extra_dims)
+        
+        # Create the point data with the custom dimension
+        # Crear los datos de puntos con la dimensión personalizada
+        las = laspy.LasData(header)
+        las.x = points[:, 0]
+        las.y = points[:, 1]
+        las.z = points[:, 2]
+        
+        # Assign tree_ids to the custom dimension
+        # Asignar tree_ids a la dimensión personalizada
+        las.tree_id = tree_ids
+        
+        # Write to file
+        # Escribir en archivo
+        las.write(output_file)
+        
+        logger.info(f"Saved {len(trees)} trees to {output_file} with IDs 1-{len(trees)}")
+        logger.info("Tree IDs are stored in the custom 'tree_id' field")
+        
+        return True
+        
+    except Exception as e:
+        raise RuntimeError(f"Error saving segmented point cloud: {str(e)}")

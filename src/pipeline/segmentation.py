@@ -250,13 +250,13 @@ def filter_tree_clusters(
 
 def segment_trees(
     points: np.ndarray,
-    voxel_size: float = 0.02,
-    eps: float = 0.1,
-    min_samples: int = 10,
+    voxel_size: float = 0.05,  
+    eps: float = 0.3,          
+    min_samples: int = 5,      
     slice_height: float = 1.3,
-    slice_thickness: float = 0.1,
-    min_tree_height: float = 1.5,
-    min_points: int = 50
+    slice_thickness: float = 0.2,  
+    min_tree_height: float = 1.0,  
+    min_points: int = 30       
 ) -> Tuple[List[np.ndarray], Dict]:
     """
     Segmenta árboles individuales de una nube de puntos LiDAR.
@@ -294,12 +294,33 @@ def segment_trees(
     # Start time to measure performance
     start_time = time.time()
     
+    # DEBUG: Add detailed point cloud statistics
+    # DEPURACIÓN: Añadir estadísticas detalladas de la nube de puntos
+    logger.info("=== POINT CLOUD DEBUG INFO ===")
+    logger.info("Input point cloud shape: %s", points.shape)
+    logger.info("Point cloud bounds: X[%.2f, %.2f], Y[%.2f, %.2f], Z[%.2f, %.2f]",
+                np.min(points[:, 0]), np.max(points[:, 0]),
+                np.min(points[:, 1]), np.max(points[:, 1]),
+                np.min(points[:, 2]), np.max(points[:, 2]))
+    logger.info("Height range: %.2f m (from %.2f to %.2f)", 
+                np.max(points[:, 2]) - np.min(points[:, 2]),
+                np.min(points[:, 2]), np.max(points[:, 2]))
+    logger.info("Parameters: voxel_size=%.3f, eps=%.3f, min_samples=%d", 
+                voxel_size, eps, min_samples)
+    logger.info("Slice parameters: height=%.2f, thickness=%.2f", 
+                slice_height, slice_thickness)
+    logger.info("Filter parameters: min_tree_height=%.2f, min_points=%d", 
+                min_tree_height, min_points)
+    
     # 1. Submuestreo opcional para acelerar procesamiento
     # Optional downsampling to speed up processing
     if voxel_size > 0:
         logger.info("Downsampling point cloud with voxel size %.3f m", voxel_size)
         logger.info("Submuestreando nube de puntos con tamaño de voxel %.3f m", voxel_size)
+        original_count = len(points)
         points = downsample_point_cloud(points, voxel_size)
+        logger.info("Downsampling: %d -> %d points (%.1f%% retained)", 
+                    original_count, len(points), 100 * len(points) / original_count)
     
     # 2. Extraer rebanada horizontal para identificación de troncos
     # Extract horizontal slice for trunk identification
@@ -309,10 +330,37 @@ def segment_trees(
                 slice_height, slice_thickness/2)
     slice_points = extract_horizontal_slice(points, slice_height, slice_thickness)
     
+    # DEBUG: Report slice extraction results
+    # DEPURACIÓN: Reportar resultados de extracción de rebanada
+    logger.info("Slice extraction: %d points found in slice", len(slice_points))
     if len(slice_points) == 0:
-        logger.warning("No points found in the horizontal slice")
-        logger.warning("No se encontraron puntos en la rebanada horizontal")
-        return [], {"error": "No points in slice", "trees_found": 0}
+        # Try different slice heights automatically
+        # Probar diferentes alturas de rebanada automáticamente
+        logger.warning("No points in original slice height. Trying adaptive slicing...")
+        logger.warning("Sin puntos en altura de rebanada original. Probando rebanado adaptativo...")
+        
+        # Try slice at different heights
+        # Probar rebanada a diferentes alturas
+        z_min, z_max = np.min(points[:, 2]), np.max(points[:, 2])
+        z_range = z_max - z_min
+        
+        # Try at 20%, 40%, 60% of height range
+        # Probar en 20%, 40%, 60% del rango de altura
+        for percentage in [0.2, 0.4, 0.6]:
+            adaptive_height = z_min + percentage * z_range
+            logger.info("Trying adaptive slice at %.2f m (%.0f%% of height range)", 
+                        adaptive_height, percentage * 100)
+            slice_points = extract_horizontal_slice(points, adaptive_height, slice_thickness)
+            if len(slice_points) > 0:
+                logger.info("SUCCESS: Found %d points at adaptive height %.2f m", 
+                            len(slice_points), adaptive_height)
+                slice_height = adaptive_height  # Update for metadata
+                break
+        
+        if len(slice_points) == 0:
+            logger.error("No points found in any horizontal slice")
+            logger.error("No se encontraron puntos en ninguna rebanada horizontal")
+            return [], {"error": "No points in slice", "trees_found": 0}
     
     # 3. Aplicar clustering para identificar troncos individuales
     # Apply clustering to identify individual trunks
@@ -322,6 +370,14 @@ def segment_trees(
                 eps, min_samples)
     _, clusters = cluster_trunks(slice_points, eps, min_samples)
     
+    # DEBUG: Report clustering results
+    # DEPURACIÓN: Reportar resultados de clustering
+    logger.info("Clustering results: %d initial clusters found", len(clusters))
+    if len(clusters) > 0:
+        cluster_sizes = [len(cluster) for cluster in clusters]
+        logger.info("Cluster sizes: min=%d, max=%d, avg=%.1f", 
+                    min(cluster_sizes), max(cluster_sizes), np.mean(cluster_sizes))
+    
     # 4. Filtrar clusters para eliminar falsos positivos
     # Filter clusters to remove false positives
     logger.info("Filtering clusters (min_height=%.2f m, min_points=%d)", 
@@ -330,6 +386,12 @@ def segment_trees(
                 min_tree_height, min_points)
     tree_clusters = filter_tree_clusters(clusters, min_tree_height, min_points, full_point_cloud=points)
 
+    # DEBUG: Report filtering results
+    # DEPURACIÓN: Reportar resultados de filtrado
+    logger.info("Filtering results: %d/%d clusters passed filter (%.1f%%)", 
+                len(tree_clusters), len(clusters), 
+                100 * len(tree_clusters) / len(clusters) if len(clusters) > 0 else 0)
+
     # 5. Empaquetar resultados y metadatos
     # Package results and metadata
     elapsed_time = time.time() - start_time
@@ -337,19 +399,27 @@ def segment_trees(
         "elapsed_time": elapsed_time,
         "n_trees": len(tree_clusters),
         "trees_found": len(tree_clusters),  # For backwards compatibility
+        "initial_clusters": len(clusters),
+        "slice_points_found": len(slice_points),
+        "adaptive_slice_height": slice_height,
         "parameters": {
             "voxel_size": voxel_size,
             "eps": eps,
             "min_samples": min_samples,
             "slice_height": slice_height,
-            "slice_thickness": slice_thickness
+            "slice_thickness": slice_thickness,
+            "min_tree_height": min_tree_height,
+            "min_points": min_points
         }
     }
     
+    logger.info("=== SEGMENTATION SUMMARY ===")
     logger.info("Tree segmentation complete: found %d trees in %.2f seconds", 
                 len(tree_clusters), elapsed_time)
     logger.info("Segmentación de árboles completa: %d árboles encontrados en %.2f segundos", 
                 len(tree_clusters), elapsed_time)
+    logger.info("Processing pipeline: %d input -> %d slice -> %d clusters -> %d trees",
+                len(points), len(slice_points), len(clusters), len(tree_clusters))
     
     return tree_clusters, metadata
 
