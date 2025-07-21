@@ -948,7 +948,7 @@ class ParametersFrame(ttk.Frame):
         self.next_button = ttk.Button(
             right_buttons, 
             text="Next →",
-            command=lambda: controller.show_frame("ClassificationFrame"),
+            command=lambda: controller.show_frame("SegmentationParametersFrame"),
             state="disabled"
         )
         self.next_button.pack(side=tk.LEFT, padx=(10, 0))
@@ -1145,6 +1145,11 @@ class ParametersFrame(ttk.Frame):
         # Update status and enable the next button
         # Actualizar estado y habilitar el botón siguiente
         self.update_status("Point cloud successfully cropped! You can proceed to the next step.", True)
+        
+        # Store reference to cropped file path in controller for next steps
+        # Almacenar referencia a la ruta del archivo recortado en el controlador para pasos siguientes
+        self.controller.cropped_file_path = output_file
+        
         self.next_button.config(state="normal")
     
     def _preview_cropped_point_cloud(self, output_file):
@@ -1709,6 +1714,11 @@ class SegmentationParametersFrame(ttk.Frame):
             # Import necessary modules
             # Importar módulos necesarios
             from src.pipeline.segmentation import segment_trees
+            from src.io import load_point_cloud
+            
+            # Load the point cloud from input file
+            # Cargar la nube de puntos desde el archivo de entrada
+            points, _ = load_point_cloud(input_file)
             
             # Update progress intermittently
             # Actualizar progreso intermitentemente
@@ -1750,9 +1760,8 @@ class SegmentationParametersFrame(ttk.Frame):
             
             # Perform the actual segmentation operation
             # Realizar la operación de segmentación real
-            result = segment_trees(
-                input_file,
-                output_file,
+            trees, metadata = segment_trees(
+                points,
                 voxel_size=voxel_size,
                 eps=eps,
                 min_samples=min_samples,
@@ -1762,9 +1771,14 @@ class SegmentationParametersFrame(ttk.Frame):
                 min_points=min_points
             )
             
+            # Save the result to the output file
+            # Guardar el resultado en el archivo de salida
+            from src.io import save_segmented_point_cloud
+            save_segmented_point_cloud(trees, output_file)
+            
             # Save the result in controller for later use
             # Guardar el resultado en el controlador para uso posterior
-            self.controller.segmentation_result = result
+            self.controller.segmentation_result = metadata
             self.controller.segmented_file_path = output_file
             
             # Reset progress
@@ -1773,7 +1787,7 @@ class SegmentationParametersFrame(ttk.Frame):
             
             # Show success message with results
             # Mostrar mensaje de éxito con resultados
-            self._show_results(result, output_file)
+            self._show_results(metadata, output_file)
             
         except Exception as e:
             # Show error
