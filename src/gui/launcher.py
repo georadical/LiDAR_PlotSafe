@@ -1341,6 +1341,7 @@ class SegmentationParametersFrame(ttk.Frame):
         self.slice_thickness = tk.DoubleVar(value=0.2)  # Default thickness of horizontal slice in meters
         self.min_tree_height = tk.DoubleVar(value=1.5)  # Default minimum tree height in meters
         self.min_points = tk.IntVar(value=50)  # Default minimum points per tree
+        self.auto_normalize = tk.BooleanVar(value=True)  # Default auto-normalization enabled
         
         # Create form fields for downsampling parameters
         # Crear campos de formulario para parámetros de submuestreo
@@ -1641,6 +1642,7 @@ class SegmentationParametersFrame(ttk.Frame):
         slice_thickness = self.slice_thickness.get()
         min_tree_height = self.min_tree_height.get()
         min_points = self.min_points.get()
+        auto_normalize = self.auto_normalize.get()
         
         # Validate parameters
         # Validar parámetros
@@ -1687,13 +1689,13 @@ class SegmentationParametersFrame(ttk.Frame):
         thread = threading.Thread(
             target=self._run_processing,
             args=(input_file, output_file, voxel_size, eps, min_samples, 
-                  slice_height, slice_thickness, min_tree_height, min_points)
+                  slice_height, slice_thickness, min_tree_height, min_points, auto_normalize)
         )
         thread.daemon = True
         thread.start()
     
     def _run_processing(self, input_file, output_file, voxel_size, eps, min_samples, 
-                       slice_height, slice_thickness, min_tree_height, min_points):
+                       slice_height, slice_thickness, min_tree_height, min_points, auto_normalize):
         """
         Run the segmentation processing operation in a separate thread.
         
@@ -1709,6 +1711,7 @@ class SegmentationParametersFrame(ttk.Frame):
             slice_thickness: Thickness of horizontal slice
             min_tree_height: Minimum tree height to keep
             min_points: Minimum points per tree to keep
+            auto_normalize: Auto-normalization flag
         """
         try:
             # Import necessary modules
@@ -1768,7 +1771,8 @@ class SegmentationParametersFrame(ttk.Frame):
                 slice_height=slice_height,
                 slice_thickness=slice_thickness,
                 min_tree_height=min_tree_height,
-                min_points=min_points
+                min_points=min_points,
+                auto_normalize=auto_normalize
             )
             
             # Save the result to the output file

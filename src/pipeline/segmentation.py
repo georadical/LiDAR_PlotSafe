@@ -256,7 +256,8 @@ def segment_trees(
     slice_height: float = 1.3,
     slice_thickness: float = 0.2,  
     min_tree_height: float = 1.0,  
-    min_points: int = 30       
+    min_points: int = 30,
+    auto_normalize: bool = True       
 ) -> Tuple[List[np.ndarray], Dict]:
     """
     Segmenta árboles individuales de una nube de puntos LiDAR.
@@ -272,14 +273,16 @@ def segment_trees(
              Distancia máxima entre puntos en clustering DBSCAN
         min_samples: Minimum number of points to form a cluster
                      Número mínimo de puntos para formar un cluster
-        slice_height: Height at which to extract the horizontal slice
-                     Altura a la que extraer la rebanada horizontal
+        slice_height: Height at which to extract the horizontal slice (used if auto_normalize=False)
+                     Altura a la que extraer la rebanada horizontal (usado si auto_normalize=False)
         slice_thickness: Thickness of the horizontal slice
                         Grosor de la rebanada horizontal
         min_tree_height: Minimum height to consider a cluster as a tree
                         Altura mínima para considerar un cluster como árbol
         min_points: Minimum points for a valid tree cluster
                    Puntos mínimos para un cluster de árbol válido
+        auto_normalize: If True, automatically detect and adapt to normalized/non-normalized clouds
+                       Si True, detecta automáticamente y se adapta a nubes normalizadas/no normalizadas
     
     Returns:
         Tuple containing:
@@ -305,6 +308,47 @@ def segment_trees(
     logger.info("Height range: %.2f m (from %.2f to %.2f)", 
                 np.max(points[:, 2]) - np.min(points[:, 2]),
                 np.min(points[:, 2]), np.max(points[:, 2]))
+    
+    # Auto-normalize detection and slice height calculation
+    # Detección de auto-normalización y cálculo de altura de rebanada
+    if auto_normalize:
+        z_min, z_max = np.min(points[:, 2]), np.max(points[:, 2])
+        z_range = z_max - z_min
+        z_percentile_5 = np.percentile(points[:, 2], 5)
+        z_percentile_95 = np.percentile(points[:, 2], 95)
+        
+        # Detect if cloud appears normalized (ground near 0) or non-normalized (large absolute values)
+        # Detectar si la nube parece normalizada (suelo cerca de 0) o no normalizada (valores absolutos grandes)
+        ground_estimate = z_percentile_5
+        
+        # Heuristic: if minimum Z is close to 0 (within 2m), assume normalized
+        # Heurística: si el Z mínimo está cerca de 0 (dentro de 2m), asumir normalizada
+        is_normalized = abs(z_min) < 2.0 and z_min >= -1.0
+        
+        if is_normalized:
+            # Use original slice_height for normalized data
+            # Usar slice_height original para datos normalizados
+            adaptive_slice_height = slice_height
+            logger.info("NORMALIZATION: Cloud appears NORMALIZED (z_min=%.2f). Using original slice_height=%.2f m",
+                       z_min, adaptive_slice_height)
+        else:
+            # For non-normalized data, use ground estimate + breast height
+            # Para datos no normalizados, usar estimación de suelo + altura de pecho
+            adaptive_slice_height = ground_estimate + slice_height
+            logger.info("NORMALIZATION: Cloud appears NON-NORMALIZED (z_min=%.2f). Ground estimate: %.2f m",
+                       z_min, ground_estimate)
+            logger.info("NORMALIZATION: Using adaptive slice_height = %.2f + %.2f = %.2f m",
+                       ground_estimate, slice_height, adaptive_slice_height)
+        
+        logger.info("NORMALIZATION: Height statistics - Min: %.2f, Max: %.2f, Range: %.2f, P5: %.2f, P95: %.2f",
+                   z_min, z_max, z_range, z_percentile_5, z_percentile_95)
+        
+        # Update slice_height for the rest of the function
+        # Actualizar slice_height para el resto de la función
+        slice_height = adaptive_slice_height
+    else:
+        logger.info("NORMALIZATION: Auto-normalize disabled. Using manual slice_height=%.2f m", slice_height)
+    
     logger.info("Parameters: voxel_size=%.3f, eps=%.3f, min_samples=%d", 
                 voxel_size, eps, min_samples)
     logger.info("Slice parameters: height=%.2f, thickness=%.2f", 
