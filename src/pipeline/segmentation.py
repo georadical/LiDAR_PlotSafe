@@ -11,52 +11,10 @@ import logging
 import time
 from typing import List, Dict, Tuple, Optional
 from sklearn.cluster import DBSCAN
+from .utils import downsample_open3d
+from .slice import extract_adaptive_slice
 
 logger = logging.getLogger(__name__)
-
-
-def downsample_point_cloud(points: np.ndarray, voxel_size: float) -> np.ndarray:
-    """
-    Submuestrea la nube de puntos usando un tamaño de voxel fijo.
-    
-    Downsamples the point cloud using a fixed voxel size.
-    
-    Args:
-        points: Nx3 array of point coordinates
-        voxel_size: Size of voxels for downsampling
-        
-    Returns:
-        Downsampled point cloud as Nx3 array
-    """
-    # Esta es una implementación simplificada; en producción usaríamos Open3D
-    # This is a simplified implementation; in production we would use Open3D
-    
-    # Calcular límites de la nube de puntos
-    # Calculate point cloud bounds
-    min_bounds = np.min(points, axis=0)
-    max_bounds = np.max(points, axis=0)
-    
-    # Discretizar puntos en voxels
-    # Discretize points into voxels
-    voxel_indices = np.floor((points - min_bounds) / voxel_size).astype(int)
-    
-    # Identificar voxels únicos y tomar un representante de cada uno
-    # Identify unique voxels and take one representative from each
-    voxel_dict = {}
-    for i, idx in enumerate(voxel_indices):
-        key = tuple(idx)
-        if key not in voxel_dict:
-            voxel_dict[key] = i
-    
-    # Construir nube submuestreada
-    # Build downsampled cloud
-    indices = list(voxel_dict.values())
-    downsampled = points[indices]
-    
-    logger.info("Downsampled from %d to %d points", len(points), len(downsampled))
-    logger.info("Submuestreado de %d a %d puntos", len(points), len(downsampled))
-    
-    return downsampled
 
 
 def extract_horizontal_slice(
@@ -425,7 +383,7 @@ def segment_trees(
         logger.info("Downsampling point cloud with voxel size %.3f m", voxel_size)
         logger.info("Submuestreando nube de puntos con tamaño de voxel %.3f m", voxel_size)
         original_count = len(points)
-        points = downsample_point_cloud(points, voxel_size)
+        points, _ = downsample_open3d(points, voxel_size)
         logger.info("Downsampling: %d -> %d points (%.1f%% retained)", 
                     original_count, len(points), 100 * len(points) / original_count)
     
@@ -435,39 +393,33 @@ def segment_trees(
                 slice_height, slice_thickness/2)
     logger.info("Extrayendo rebanada horizontal a altura %.2f m (±%.2f m)", 
                 slice_height, slice_thickness/2)
-    slice_points = extract_horizontal_slice(points, slice_height, slice_thickness)
+    
+    # Use adaptive slice extraction for robustness
+    # Usar extracción de rebanada adaptativa para robustez
+    slice_points, slice_height, warn = extract_adaptive_slice(
+        points,
+        preferred_height=slice_height,
+        thickness=slice_thickness,
+        min_points=200
+    )
+    
+    # Log any warnings from adaptive slicing
+    # Registrar cualquier advertencia del rebanado adaptativo
+    if warn:
+        logger.warning("Adaptive slice warning: %s", warn)
+        logger.warning("Advertencia de rebanada adaptativa: %s", warn)
     
     # DEBUG: Report slice extraction results
     # DEPURACIÓN: Reportar resultados de extracción de rebanada
-    logger.info("Slice extraction: %d points found in slice", len(slice_points))
+    logger.info("Slice extraction: %d points found in slice at height %.2f m", 
+                len(slice_points), slice_height)
+    logger.info("Extracción de rebanada: %d puntos encontrados en rebanada a altura %.2f m", 
+                len(slice_points), slice_height)
+    
     if len(slice_points) == 0:
-        # Try different slice heights automatically
-        # Probar diferentes alturas de rebanada automáticamente
-        logger.warning("No points in original slice height. Trying adaptive slicing...")
-        logger.warning("Sin puntos en altura de rebanada original. Probando rebanado adaptativo...")
-        
-        # Try slice at different heights
-        # Probar rebanada a diferentes alturas
-        z_min, z_max = np.min(points[:, 2]), np.max(points[:, 2])
-        z_range = z_max - z_min
-        
-        # Try at 20%, 40%, 60% of height range
-        # Probar en 20%, 40%, 60% del rango de altura
-        for percentage in [0.2, 0.4, 0.6]:
-            adaptive_height = z_min + percentage * z_range
-            logger.info("Trying adaptive slice at %.2f m (%.0f%% of height range)", 
-                        adaptive_height, percentage * 100)
-            slice_points = extract_horizontal_slice(points, adaptive_height, slice_thickness)
-            if len(slice_points) > 0:
-                logger.info("SUCCESS: Found %d points at adaptive height %.2f m", 
-                            len(slice_points), adaptive_height)
-                slice_height = adaptive_height  # Update for metadata
-                break
-        
-        if len(slice_points) == 0:
-            logger.error("No points found in any horizontal slice")
-            logger.error("No se encontraron puntos en ninguna rebanada horizontal")
-            return [], {"error": "No points in slice", "trees_found": 0}
+        logger.error("No points found in any horizontal slice")
+        logger.error("No se encontraron puntos en ninguna rebanada horizontal")  
+        return [], {"error": "No points in slice", "trees_found": 0}
     
     # 3. Aplicar clustering para identificar troncos individuales
     # Apply clustering to identify individual trunks
