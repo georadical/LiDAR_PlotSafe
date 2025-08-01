@@ -11,6 +11,14 @@ mesh: false  # Generar mesh (true/false)
 threads: 4  # Número de hilos para procesamiento paralelo
 verbose: true  # Habilita logs detallados
 
+# Parámetros de clustering DBSCAN
+eps: "auto"  # Valor epsilon para DBSCAN ("auto" para cálculo adaptativo, o valor numérico)
+min_samples: 5  # Número mínimo de muestras para formar un cluster
+k_neighbors: 8  # Número de vecinos para cálculo de epsilon adaptativo
+eps_factor: 2.0  # Factor multiplicativo para epsilon adaptativo
+min_eps: 0.02  # Valor mínimo permitido para epsilon
+max_eps: 1.0  # Valor máximo permitido para epsilon
+
 # Coordenada semilla opcional (para árbol central)
 # Formato: [X, Y, Z]
 seed: []

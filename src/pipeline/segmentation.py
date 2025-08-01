@@ -9,10 +9,11 @@ Tree segmentation module for LiDAR PlotSafe.
 import numpy as np
 import logging
 import time
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Any
 from sklearn.cluster import DBSCAN
 from .utils import downsample_open3d
 from .slice import extract_adaptive_slice
+from .clustering import compute_eps, dbscan_trunks
 
 logger = logging.getLogger(__name__)
 
@@ -55,8 +56,8 @@ def extract_horizontal_slice(
 
 def cluster_trunks(
     points: np.ndarray, 
-    eps: float, 
-    min_samples: int
+    eps: float = None, 
+    min_samples: int = 5
 ) -> Tuple[np.ndarray, List[np.ndarray]]:
     """
     Agrupa puntos para identificar troncos individuales usando DBSCAN.
@@ -65,7 +66,7 @@ def cluster_trunks(
     
     Args:
         points: Nx3 array of point coordinates
-        eps: Maximum distance between points in DBSCAN clustering
+        eps: Maximum distance between points in DBSCAN clustering (if None, computed automatically)
         min_samples: Minimum number of points to form a cluster
         
     Returns:
@@ -76,29 +77,43 @@ def cluster_trunks(
     if len(points) == 0:
         return np.array([]), []
     
-    # Aplicar DBSCAN solo a coordenadas X e Y (ignorando altura)
-    # Apply DBSCAN only to X and Y coordinates (ignoring height)
-    dbscan = DBSCAN(eps=eps, min_samples=min_samples)
-    labels = dbscan.fit_predict(points[:, :2])
+    # Calcular epsilon adaptativo si no se proporciona
+    # Calculate adaptive epsilon if not provided
+    if eps is None:
+        eps = compute_eps(points[:, :2], k=8, factor=2.0)
+        logger.info("Adaptive eps computed = %.3f m", eps)
+        logger.info("Eps adaptativo calculado = %.3f m", eps)
+    else:
+        logger.info("Using provided eps = %.3f m", eps)
+        logger.info("Usando eps proporcionado = %.3f m", eps)
     
-    # Extraer clusters individuales
-    # Extract individual clusters
-    unique_labels = np.unique(labels)
-    clusters = []
+    # Usar wrapper de DBSCAN
+    # Use DBSCAN wrapper
+    labels, clusters = dbscan_trunks(points[:, :2], eps=eps, min_samples=min_samples)
     
-    for label in unique_labels:
-        if label == -1:  # Ignorar ruido / Ignore noise
-            continue
+    # Convertir clusters 2D de vuelta a 3D usando las coordenadas originales
+    # Convert 2D clusters back to 3D using original coordinates
+    clusters_3d = []
+    for cluster_2d in clusters:
+        # Encontrar índices de los puntos del cluster en el array original
+        # Find indices of cluster points in the original array
+        cluster_indices = []
+        for pt_2d in cluster_2d:
+            # Buscar el punto 2D en el array original para obtener el índice
+            # Search for the 2D point in the original array to get the index
+            distances = np.sum((points[:, :2] - pt_2d) ** 2, axis=1)
+            idx = np.argmin(distances)
+            cluster_indices.append(idx)
         
-        # Extraer puntos del cluster
-        # Extract cluster points
-        cluster_points = points[labels == label]
-        clusters.append(cluster_points)
+        # Extraer puntos 3D correspondientes
+        # Extract corresponding 3D points
+        cluster_3d = points[cluster_indices]
+        clusters_3d.append(cluster_3d)
     
-    logger.info("Found %d clusters with DBSCAN", len(clusters))
-    logger.info("Encontrados %d clusters con DBSCAN", len(clusters))
+    logger.info("Found %d clusters with DBSCAN", len(clusters_3d))
+    logger.info("Encontrados %d clusters con DBSCAN", len(clusters_3d))
     
-    return labels, clusters
+    return labels, clusters_3d
 
 
 def filter_tree_clusters(
@@ -272,13 +287,14 @@ def expand_cluster_to_trunk(
 def segment_trees(
     points: np.ndarray,
     voxel_size: float = 0.05,  
-    eps: float = 0.3,          
+    eps_mode: str = "adaptive",     # New parameter: "adaptive" or "custom"
+    eps: float = None,          
     min_samples: int = 5,      
     slice_height: float = 1.3,
     slice_thickness: float = 0.2,  
     min_tree_height: float = 1.0,  
     min_points: int = 30,
-    auto_normalize: bool = True       
+    auto_normalize: bool = True      
 ) -> Tuple[List[np.ndarray], Dict]:
     """
     Segmenta árboles individuales de una nube de puntos LiDAR.
@@ -290,8 +306,10 @@ def segment_trees(
                 Array Nx3 de coordenadas de puntos
         voxel_size: Size of voxels for downsampling
                     Tamaño de voxeles para submuestreo
-        eps: Maximum distance between points in DBSCAN clustering
-             Distancia máxima entre puntos en clustering DBSCAN
+        eps_mode: Epsilon mode - "adaptive" for automatic calculation or "custom" for manual value
+                  Modo de epsilon - "adaptive" para cálculo automático o "custom" para valor manual
+        eps: Maximum distance between points in DBSCAN clustering (used when eps_mode="custom")
+             Distancia máxima entre puntos en clustering DBSCAN (usado cuando eps_mode="custom")
         min_samples: Minimum number of points to form a cluster
                      Número mínimo de puntos para formar un cluster
         slice_height: Height at which to extract the horizontal slice (used if auto_normalize=False)
@@ -317,6 +335,20 @@ def segment_trees(
     # Tiempo de inicio para medir rendimiento
     # Start time to measure performance
     start_time = time.time()
+    
+    # Handle epsilon mode
+    # Manejar modo de epsilon
+    if eps_mode == "adaptive":
+        eps_value = None  # This will trigger adaptive calculation in cluster_trunks
+        logger.info("Using adaptive epsilon calculation mode")
+        logger.info("Usando modo de cálculo adaptativo de epsilon")
+    else:  # eps_mode == "custom"
+        if eps is None or eps <= 0:
+            raise ValueError("Custom epsilon mode requires a positive eps value")
+            # El modo epsilon personalizado requiere un valor eps positivo
+        eps_value = eps
+        logger.info("Using custom epsilon value: %.3f m", eps_value)
+        logger.info("Usando valor de epsilon personalizado: %.3f m", eps_value)
     
     # DEBUG: Add detailed point cloud statistics
     # DEPURACIÓN: Añadir estadísticas detalladas de la nube de puntos
@@ -370,8 +402,8 @@ def segment_trees(
     else:
         logger.info("NORMALIZATION: Auto-normalize disabled. Using manual slice_height=%.2f m", slice_height)
     
-    logger.info("Parameters: voxel_size=%.3f, eps=%.3f, min_samples=%d", 
-                voxel_size, eps, min_samples)
+    logger.info("Parameters: voxel_size=%.3f, eps_mode=%s, eps=%s, min_samples=%d", 
+                voxel_size, eps_mode, "auto" if eps_value is None else f"{eps_value:.3f}", min_samples)
     logger.info("Slice parameters: height=%.2f, thickness=%.2f", 
                 slice_height, slice_thickness)
     logger.info("Filter parameters: min_tree_height=%.2f, min_points=%d", 
@@ -423,11 +455,12 @@ def segment_trees(
     
     # 3. Aplicar clustering para identificar troncos individuales
     # Apply clustering to identify individual trunks
-    logger.info("Clustering points with DBSCAN (eps=%.3f, min_samples=%d)", 
-                eps, min_samples)
-    logger.info("Agrupando puntos con DBSCAN (eps=%.3f, min_samples=%d)", 
-                eps, min_samples)
-    _, clusters = cluster_trunks(slice_points, eps, min_samples)
+    logger.info("Clustering slice points with DBSCAN (eps_mode=%s, eps=%s)", 
+                eps_mode, "auto" if eps_value is None else f"{eps_value:.3f}")
+    logger.info("Agrupando puntos de rebanada con DBSCAN (eps_mode=%s, eps=%s)", 
+                eps_mode, "auto" if eps_value is None else f"{eps_value:.3f}")
+    
+    labels, clusters = cluster_trunks(slice_points, eps=eps_value, min_samples=min_samples)
     
     # DEBUG: Report clustering results
     # DEPURACIÓN: Reportar resultados de clustering
@@ -463,12 +496,14 @@ def segment_trees(
         "adaptive_slice_height": slice_height,
         "parameters": {
             "voxel_size": voxel_size,
-            "eps": eps,
+            "eps_mode": eps_mode,
+            "eps": eps_value,
             "min_samples": min_samples,
-            "slice_height": slice_height,
-            "slice_thickness": slice_thickness,
-            "min_tree_height": min_tree_height,
-            "min_points": min_points
+            'slice_height': slice_height,
+        'slice_thickness': slice_thickness,
+        'min_tree_height': min_tree_height,
+        'min_points': min_points,
+        'adaptive_eps': eps_value is None,
         }
     }
     

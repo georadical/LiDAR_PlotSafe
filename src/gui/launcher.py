@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-© 2025 LiDAR PlotSafe Project. All rights reserved.
+ LiDAR PlotSafe Project. All rights reserved.
 
 Launcher GUI for LiDAR PlotSafe processing pipeline.
 
@@ -1335,6 +1335,7 @@ class SegmentationParametersFrame(ttk.Frame):
         # Configure parameter variables
         # Configurar variables de parámetros
         self.voxel_size = tk.DoubleVar(value=0.05)  # Default voxel size in meters
+        self.eps_mode = tk.StringVar(value="adaptive")  # Default epsilon mode: "adaptive" or "custom"
         self.eps = tk.DoubleVar(value=0.2)  # Default eps for DBSCAN in meters
         self.min_samples = tk.IntVar(value=5)  # Default min_samples for DBSCAN
         self.slice_height = tk.DoubleVar(value=1.3)  # Default height of horizontal slice (DBH height) in meters
@@ -1488,10 +1489,18 @@ class SegmentationParametersFrame(ttk.Frame):
         )
         eps_label.pack(side=tk.LEFT, padx=(0, 5))
         
+        eps_mode = ttk.Combobox(
+            eps_frame,
+            textvariable=self.eps_mode,
+            values=["adaptive", "custom"],
+            width=10
+        )
+        eps_mode.pack(side=tk.LEFT)
+        
         eps_entry = ttk.Entry(
             eps_frame,
             textvariable=self.eps,
-            width=15
+            width=10
         )
         eps_entry.pack(side=tk.LEFT)
         
@@ -1636,6 +1645,7 @@ class SegmentationParametersFrame(ttk.Frame):
         # Get parameters from form
         # Obtener parámetros del formulario
         voxel_size = self.voxel_size.get()
+        eps_mode = self.eps_mode.get()
         eps = self.eps.get()
         min_samples = self.min_samples.get()
         slice_height = self.slice_height.get()
@@ -1649,7 +1659,7 @@ class SegmentationParametersFrame(ttk.Frame):
         if voxel_size <= 0:
             self.update_status("Voxel size must be positive", False)
             return
-        if eps <= 0:
+        if eps_mode == "custom" and eps <= 0:
             self.update_status("DBSCAN distance must be positive", False)
             return
         if min_samples <= 0:
@@ -1688,13 +1698,13 @@ class SegmentationParametersFrame(ttk.Frame):
         # Iniciar procesamiento en un hilo separado para mantener la interfaz responsiva
         thread = threading.Thread(
             target=self._run_processing,
-            args=(input_file, output_file, voxel_size, eps, min_samples, 
+            args=(input_file, output_file, voxel_size, eps_mode, eps, min_samples, 
                   slice_height, slice_thickness, min_tree_height, min_points, auto_normalize)
         )
         thread.daemon = True
         thread.start()
     
-    def _run_processing(self, input_file, output_file, voxel_size, eps, min_samples, 
+    def _run_processing(self, input_file, output_file, voxel_size, eps_mode, eps, min_samples, 
                        slice_height, slice_thickness, min_tree_height, min_points, auto_normalize):
         """
         Run the segmentation processing operation in a separate thread.
@@ -1705,6 +1715,7 @@ class SegmentationParametersFrame(ttk.Frame):
             input_file: Path to input file
             output_file: Path to output file
             voxel_size: Voxel size for downsampling
+            eps_mode: Epsilon mode ("adaptive" or "custom")
             eps: DBSCAN distance parameter
             min_samples: Minimum points per DBSCAN cluster
             slice_height: Height of horizontal slice
@@ -1766,6 +1777,7 @@ class SegmentationParametersFrame(ttk.Frame):
             trees, metadata = segment_trees(
                 points,
                 voxel_size=voxel_size,
+                eps_mode=eps_mode,
                 eps=eps,
                 min_samples=min_samples,
                 slice_height=slice_height,
