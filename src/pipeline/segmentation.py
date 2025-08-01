@@ -14,6 +14,7 @@ from sklearn.cluster import DBSCAN
 from .utils import downsample_open3d
 from .slice import extract_adaptive_slice
 from .clustering import compute_eps, dbscan_trunks
+from .expansion import expand_and_merge_clusters
 
 logger = logging.getLogger(__name__)
 

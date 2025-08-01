@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-© 2025 LiDAR PlotSafe Project. All rights reserved.
+ 2025 LiDAR PlotSafe Project. All rights reserved.
 
 Point cloud export module for LiDAR PlotSafe.
 
@@ -13,7 +13,9 @@ import os
 import laspy
 import numpy as np
 from typing import Dict, List, Optional, Tuple, Union
+import logging
 
+logger = logging.getLogger(__name__)
 
 def save_expanded_trees(
     trees: List[np.ndarray], 
@@ -47,9 +49,6 @@ def save_expanded_trees(
     RuntimeError
         If there's an error during the saving process.
     """
-    import logging
-    logger = logging.getLogger(__name__)
-    
     # Validate file extension
     # Validar extensión del archivo
     _, ext = os.path.splitext(output_file)
@@ -166,3 +165,93 @@ def save_expanded_trees(
         
     except Exception as e:
         raise RuntimeError(f"Error saving expanded trees: {str(e)}")
+
+
+def export_full_trunks(
+    xyz: np.ndarray,
+    tree_ids: np.ndarray,
+    extra: Optional[Dict[str, np.ndarray]] = None,
+    out_path: str = "trees_full.laz"
+) -> bool:
+    """
+    Write merged trunk cloud preserving scalar fields + new Tree_ID.
+    Escribe nube de troncos fusionados preservando campos escalares + nuevo Tree_ID.
+    
+    Args:
+        xyz: Nx3 array of point coordinates (X, Y, Z)
+        tree_ids: Nx1 array of tree identifiers for each point
+        extra: Optional dictionary of additional scalar fields to preserve
+        out_path: Output file path for LAS/LAZ file
+        
+    Returns:
+        bool: True if export successful, False otherwise
+        
+    Raises:
+        ValueError: If input arrays have incompatible shapes
+        IOError: If file cannot be written
+    """
+    # Input validation / Validación de entrada
+    if xyz.shape[0] != len(tree_ids):
+        raise ValueError(f"Point count mismatch: xyz={xyz.shape[0]}, tree_ids={len(tree_ids)}")
+        
+    if xyz.shape[1] != 3:
+        raise ValueError(f"XYZ array must have 3 columns, got {xyz.shape[1]}")
+        
+    logger.info("Exporting %d points with Tree_ID to %s", len(xyz), out_path)
+    logger.info("Exportando %d puntos con Tree_ID a %s", len(xyz), out_path)
+    
+    try:
+        # Create LAS file with proper header / Crear archivo LAS con encabezado apropiado
+        header = laspy.create(file_version="1.4", point_format=3)
+        las = laspy.LasData(header)
+        
+        # Set coordinates / Establecer coordenadas
+        las.x, las.y, las.z = xyz.T
+        
+        # Add extra scalar fields / Añadir campos escalares adicionales
+        if extra:
+            for name, arr in extra.items():
+                if len(arr) != len(xyz):
+                    logger.warning("Skipping field '%s': length mismatch (%d vs %d)", 
+                                   name, len(arr), len(xyz))
+                    logger.warning("Saltando campo '%s': longitud no coincide (%d vs %d)", 
+                                   name, len(arr), len(xyz))
+                    continue
+                    
+                try:
+                    # Create extra dimension / Crear dimensión extra
+                    las.add_extra_dim(laspy.ExtraBytesParams(name=name, type=np.float32))
+                    las[name] = arr.astype(np.float32)
+                    logger.debug("Added extra field: %s", name)
+                    logger.debug("Campo extra añadido: %s", name)
+                except Exception as e:
+                    logger.error("Failed to add field '%s': %s", name, e)
+                    logger.error("Error al añadir campo '%s': %s", name, e)
+        
+        # Add Tree_ID field / Añadir campo Tree_ID
+        las.add_extra_dim(laspy.ExtraBytesParams(name="Tree_ID", type=np.uint32))
+        las["Tree_ID"] = tree_ids.astype(np.uint32)
+        
+        # Ensure output directory exists / Asegurar que directorio de salida existe
+        os.makedirs(os.path.dirname(out_path) if os.path.dirname(out_path) else ".", exist_ok=True)
+        
+        # Write file / Escribir archivo
+        las.write(out_path)
+        
+        # Verify file was created / Verificar que archivo fue creado
+        if os.path.exists(out_path):
+            file_size = os.path.getsize(out_path) / (1024 * 1024)  # MB
+            logger.info("Successfully exported %d points to %s (%.2f MB)", 
+                        len(xyz), out_path, file_size)
+            logger.info("Exportación exitosa de %d puntos a %s (%.2f MB)", 
+                        len(xyz), out_path, file_size)
+            return True
+        else:
+            logger.error("File was not created: %s", out_path)
+            logger.error("Archivo no fue creado: %s", out_path)
+            return False
+            
+    except Exception as e:
+        logger.error("Export failed: %s", str(e))
+        logger.error("Exportación falló: %s", str(e))
+        return False
