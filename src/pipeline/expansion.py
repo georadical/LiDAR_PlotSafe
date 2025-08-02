@@ -8,6 +8,7 @@ import numpy as np
 import logging
 from typing import List, Tuple, Optional
 from dataclasses import dataclass
+from .verticality import vertical_mask, apply_verticality_filter
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,11 @@ class ExpansionConfig:
     merge_tolerance: float = 0.25      # Distance threshold for merging / Umbral de distancia para fusión
     min_points_per_trunk: int = 10     # Minimum points required per trunk / Puntos mínimos requeridos por tronco
     max_expansion_ratio: float = 5.0   # Max ratio of expanded to original points / Ratio máximo de puntos expandidos a originales
+    # Verticality filter parameters / Parámetros del filtro de verticalidad
+    use_verticality_filter: bool = False
+    verticality_radius: float = 0.10
+    verticality_cos_threshold: float = 0.85
+    verticality_min_neighbors: int = 10
 
 
 def expand_cluster_to_trunk(
@@ -203,7 +209,9 @@ def expand_and_merge_clusters(
         'successful_expansions': 0,
         'failed_expansions': 0,
         'total_points_before': 0,
-        'total_points_after': 0
+        'total_points_after': 0,
+        'verticality_filtered_points': 0,
+        'verticality_kept_ratio': 1.0
     }
     
     for i, cluster in enumerate(slice_clusters):
@@ -218,12 +226,56 @@ def expand_and_merge_clusters(
         )
         
         if expanded is not None:
-            expanded_trunks.append(expanded)
-            expansion_stats['successful_expansions'] += 1
-            expansion_stats['total_points_after'] += expanded.shape[0]
+            # Apply verticality filter to expanded trunk if enabled
+            # Aplicar filtro de verticalidad al tronco expandido si está habilitado
+            if config.use_verticality_filter:
+                logger.debug(f"Applying verticality filter to expanded trunk {i}")
+                logger.debug(f"Aplicando filtro de verticalidad al tronco expandido {i}")
+                
+                # Filter the expanded trunk using verticality criteria
+                # Filtrar el tronco expandido usando criterios de verticalidad
+                filtered_trunk, kept_indices, _ = apply_verticality_filter(
+                    expanded,
+                    radius=config.verticality_radius,
+                    cos_threshold=config.verticality_cos_threshold,
+                    min_neighbors=config.verticality_min_neighbors,
+                    return_normals=False
+                )
+                
+                # Check if trunk still meets minimum requirements after filtering
+                # Verificar si el tronco aún cumple los requisitos mínimos después del filtrado
+                if len(filtered_trunk) >= config.min_points_per_trunk:
+                    expanded_trunks.append(filtered_trunk)
+                    expansion_stats['successful_expansions'] += 1
+                    expansion_stats['total_points_after'] += len(filtered_trunk)
+                    expansion_stats['verticality_filtered_points'] += len(filtered_trunk)
+                    
+                    kept_ratio = len(filtered_trunk) / len(expanded) if len(expanded) > 0 else 0.0
+                    logger.debug(f"Trunk {i}: verticality filter kept {len(filtered_trunk)}/{len(expanded)} points (%.1f%%)", 100.0 * kept_ratio)
+                    logger.debug(f"Tronco {i}: filtro de verticalidad conservó {len(filtered_trunk)}/{len(expanded)} puntos (%.1f%%)", 100.0 * kept_ratio)
+                else:
+                    expansion_stats['failed_expansions'] += 1
+                    logger.debug(f"Trunk {i} rejected: insufficient points after verticality filter ({len(filtered_trunk)} < {config.min_points_per_trunk})")
+                    logger.debug(f"Tronco {i} rechazado: puntos insuficientes después del filtro de verticalidad ({len(filtered_trunk)} < {config.min_points_per_trunk})")
+            else:
+                # No verticality filtering, use expanded trunk as-is
+                # Sin filtrado de verticalidad, usar tronco expandido tal como está
+                expanded_trunks.append(expanded)
+                expansion_stats['successful_expansions'] += 1
+                expansion_stats['total_points_after'] += expanded.shape[0]
         else:
             expansion_stats['failed_expansions'] += 1
             logger.debug(f"Failed to expand cluster {i}")
+    
+    # Calculate overall verticality filtering statistics
+    # Calcular estadísticas generales del filtrado de verticalidad
+    if config.use_verticality_filter and expansion_stats['total_points_after'] > 0:
+        expansion_stats['verticality_kept_ratio'] = (
+            expansion_stats['verticality_filtered_points'] / 
+            (expansion_stats['total_points_after'] + expansion_stats['verticality_filtered_points'])
+        )
+        logger.info(f"Verticality filtering: kept {expansion_stats['verticality_filtered_points']} points (ratio: {expansion_stats['verticality_kept_ratio']:.3f})")
+        logger.info(f"Filtrado de verticalidad: conservó {expansion_stats['verticality_filtered_points']} puntos (ratio: {expansion_stats['verticality_kept_ratio']:.3f})")
     
     # Step 2: Merge overlapping trunks / Paso 2: Fusiona troncos superpuestos  
     if expanded_trunks:

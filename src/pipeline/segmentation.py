@@ -15,6 +15,7 @@ from .utils import downsample_open3d
 from .slice import extract_adaptive_slice
 from .clustering import compute_eps, dbscan_trunks
 from .expansion import expand_and_merge_clusters
+from pipeline.verticality import vertical_mask
 
 logger = logging.getLogger(__name__)
 
@@ -295,7 +296,13 @@ def segment_trees(
     slice_thickness: float = 0.2,  
     min_tree_height: float = 1.0,  
     min_points: int = 30,
-    auto_normalize: bool = True      
+    auto_normalize: bool = True,
+    # Verticality filter parameters
+    # Parámetros del filtro de verticalidad
+    use_verticality_filter: bool = True,
+    verticality_radius: float = 0.10,
+    verticality_cos_threshold: float = 0.85,
+    verticality_min_neighbors: int = 10
 ) -> Tuple[List[np.ndarray], Dict]:
     """
     Segmenta árboles individuales de una nube de puntos LiDAR.
@@ -323,6 +330,14 @@ def segment_trees(
                    Puntos mínimos para un cluster de árbol válido
         auto_normalize: If True, automatically detect and adapt to normalized/non-normalized clouds
                        Si True, detecta automáticamente y se adapta a nubes normalizadas/no normalizadas
+        use_verticality_filter: If True, apply verticality filter before clustering
+                               Si True, aplicar filtro de verticalidad antes de clustering
+        verticality_radius: Search radius for verticality filter (meters)
+                           Radio de búsqueda para filtro de verticalidad (metros)
+        verticality_cos_threshold: Cosine threshold for vertical surface detection
+                                  Umbral de coseno para detección de superficies verticales
+        verticality_min_neighbors: Minimum neighbors for PCA computation in verticality filter
+                                  Mínimo de vecinos para cálculo PCA en filtro de verticalidad
     
     Returns:
         Tuple containing:
@@ -362,53 +377,6 @@ def segment_trees(
     logger.info("Height range: %.2f m (from %.2f to %.2f)", 
                 np.max(points[:, 2]) - np.min(points[:, 2]),
                 np.min(points[:, 2]), np.max(points[:, 2]))
-    
-    # Auto-normalize detection and slice height calculation
-    # Detección de auto-normalización y cálculo de altura de rebanada
-    if auto_normalize:
-        z_min, z_max = np.min(points[:, 2]), np.max(points[:, 2])
-        z_range = z_max - z_min
-        z_percentile_5 = np.percentile(points[:, 2], 5)
-        z_percentile_95 = np.percentile(points[:, 2], 95)
-        
-        # Detect if cloud appears normalized (ground near 0) or non-normalized (large absolute values)
-        # Detectar si la nube parece normalizada (suelo cerca de 0) o no normalizada (valores absolutos grandes)
-        ground_estimate = z_percentile_5
-        
-        # Heuristic: if minimum Z is close to 0 (within 2m), assume normalized
-        # Heurística: si el Z mínimo está cerca de 0 (dentro de 2m), asumir normalizada
-        is_normalized = abs(z_min) < 2.0 and z_min >= -1.0
-        
-        if is_normalized:
-            # Use original slice_height for normalized data
-            # Usar slice_height original para datos normalizados
-            adaptive_slice_height = slice_height
-            logger.info("NORMALIZATION: Cloud appears NORMALIZED (z_min=%.2f). Using original slice_height=%.2f m",
-                       z_min, adaptive_slice_height)
-        else:
-            # For non-normalized data, use ground estimate + breast height
-            # Para datos no normalizados, usar estimación de suelo + altura de pecho
-            adaptive_slice_height = ground_estimate + slice_height
-            logger.info("NORMALIZATION: Cloud appears NON-NORMALIZED (z_min=%.2f). Ground estimate: %.2f m",
-                       z_min, ground_estimate)
-            logger.info("NORMALIZATION: Using adaptive slice_height = %.2f + %.2f = %.2f m",
-                       ground_estimate, slice_height, adaptive_slice_height)
-        
-        logger.info("NORMALIZATION: Height statistics - Min: %.2f, Max: %.2f, Range: %.2f, P5: %.2f, P95: %.2f",
-                   z_min, z_max, z_range, z_percentile_5, z_percentile_95)
-        
-        # Update slice_height for the rest of the function
-        # Actualizar slice_height para el resto de la función
-        slice_height = adaptive_slice_height
-    else:
-        logger.info("NORMALIZATION: Auto-normalize disabled. Using manual slice_height=%.2f m", slice_height)
-    
-    logger.info("Parameters: voxel_size=%.3f, eps_mode=%s, eps=%s, min_samples=%d", 
-                voxel_size, eps_mode, "auto" if eps_value is None else f"{eps_value:.3f}", min_samples)
-    logger.info("Slice parameters: height=%.2f, thickness=%.2f", 
-                slice_height, slice_thickness)
-    logger.info("Filter parameters: min_tree_height=%.2f, min_points=%d", 
-                min_tree_height, min_points)
     
     # 1. Submuestreo opcional para acelerar procesamiento
     # Optional downsampling to speed up processing
@@ -453,6 +421,20 @@ def segment_trees(
         logger.error("No points found in any horizontal slice")
         logger.error("No se encontraron puntos en ninguna rebanada horizontal")  
         return [], {"error": "No points in slice", "trees_found": 0}
+    
+    # Apply verticality filter after slice extraction
+    # Aplicar filtro de verticalidad después de la extracción de rebanada
+    logger.info("Applying verticality filter to slice points")
+    logger.info("Aplicando filtro de verticalidad a puntos de rebanada")
+    mask = vertical_mask(slice_points[:, :3], radius=0.1, cos_thresh=0.85)
+    slice_points = slice_points[mask]
+    if len(slice_points) < 50:
+        logger.error("Too few vertical points in slice; aborting.")
+        logger.error("Muy pocos puntos verticales en la rebanada; abortando.")
+        return [], {"error": "verticality filter empty", "trees_found": 0}
+    
+    logger.info("Verticality filter applied: %d points remaining", len(slice_points))
+    logger.info("Filtro de verticalidad aplicado: %d puntos restantes", len(slice_points))
     
     # 3. Aplicar clustering para identificar troncos individuales
     # Apply clustering to identify individual trunks
@@ -500,7 +482,7 @@ def segment_trees(
             "eps_mode": eps_mode,
             "eps": eps_value,
             "min_samples": min_samples,
-            'slice_height': slice_height,
+        'slice_height': slice_height,
         'slice_thickness': slice_thickness,
         'min_tree_height': min_tree_height,
         'min_points': min_points,
