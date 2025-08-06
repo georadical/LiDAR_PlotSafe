@@ -16,6 +16,7 @@ from .slice import extract_adaptive_slice
 from .clustering import compute_eps, dbscan_trunks
 from .expansion import expand_and_merge_clusters
 from pipeline.verticality import vertical_mask
+from pipeline.pruning import iterative_prune
 
 logger = logging.getLogger(__name__)
 
